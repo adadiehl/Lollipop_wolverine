@@ -1,0 +1,5 @@
+Signal	Format	Path
+CTCF_ChIP-seq	narrowPeak	/home/adadiehl/3D-Prediction/data/ChIP-seq/CTCF/CTCF.GM12878.mergesort.narrowPeak.bgz
+RAD21_ChIP-seq	narrowPeak	/home/adadiehl/3D-Prediction/data/ChIP-seq/RAD21/RAD21.GM12878.mergesort.narrowPeak.bgz
+SMC3_ChIP-seq	narrowPeak	/home/adadiehl/3D-Prediction/data/ChIP-seq/SMC3/SMC3.GM12878.mergesort.narrowPeak.bgz
+Motif	bed	/data/motifs/hg19.CTCF.ren.motif_predictions.sorted.bed.bgz
