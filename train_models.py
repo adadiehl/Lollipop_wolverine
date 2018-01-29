@@ -23,7 +23,7 @@ import pandas as pd
 from scipy import interp
 import matplotlib.pyplot as plt
 
-def get_true_and_proba(estimator, X, y, n_folds, cv):
+def get_true_and_proba(estimator, X, y, n_folds, cv, opt):
     ys = [[],[]]
     for train_idx, valid_idx in cv:
         clf = estimator
@@ -42,7 +42,7 @@ def get_true_and_proba(estimator, X, y, n_folds, cv):
         ys[1] = ys[1]+list(cur_prob)
     return ys
 
-def fit_and_score_CV(estimator, X, y, n_folds=10, stratify=True):
+def fit_and_score_CV(estimator, X, y, opt, n_folds=10, stratify=True):
     
     if not stratify:
         cv_arg = sklearn.cross_validation.KFold(y.size, n_folds)
@@ -50,7 +50,7 @@ def fit_and_score_CV(estimator, X, y, n_folds=10, stratify=True):
         cv_arg = sklearn.cross_validation.StratifiedKFold(y, n_folds)
     
 
-    ys = get_true_and_proba(estimator, X, y, n_folds, cv_arg)    
+    ys = get_true_and_proba(estimator, X, y, n_folds, cv_arg, opt)    
     return ys
 
 def get_pr(clf,data):
@@ -73,13 +73,14 @@ def main(argv):
                       help='Number of processors to use. Default=1.') # AGD, 1/29/2018
     parser.add_option('-n', '--n_estimators', type=int, default=100,
                       help='The number of trees in the random forest. Default 100.') # AGD, 1/29/2018
+    parser.add_option('-m', '--max_features', type=int, default=18,
+                      help='Maximum number of features. Default 18. Specify -1 for all features.') # AGD, 1/29/2018
 
     (opt, args) = parser.parse_args(argv)
     if len(argv) < 4:
         parser.print_help()
         sys.exit(1)
-
-    
+        
     print 'Reading in features...'
     data = pd.read_table(opt.train)
     features = data.columns.values[4:]
@@ -96,10 +97,13 @@ def main(argv):
 
     # Use Random Forest classifier to predict interactions
     random_state = np.random.RandomState(0)
-    rf = RandomForestClassifier(max_depth = 36,max_features=18, n_estimators=opt.n_estimators, random_state = random_state,n_jobs=opt.procs, class_weight={0:1,1:n2p}) # AGD, 1/29/2018: n_estimators and n_jobs configurable
+    if opt.max_features > 0:
+        rf = RandomForestClassifier(max_depth = 36,max_features=opt.max_features, n_estimators=opt.n_estimators, random_state = random_state,n_jobs=opt.procs, class_weight={0:1,1:n2p}) # AGD, 1/29/2018: n_estimators and n_jobs configurable
+    else:
+        rf = RandomForestClassifier(max_depth = 36,n_estimators=opt.n_estimators, random_state = random_state,n_jobs=opt.procs, class_weight={0:1,1:n2p})
 
     print 'Training model...'
-    ys = fit_and_score_CV(rf, X, Y, n_folds=10, stratify=True)         
+    ys = fit_and_score_CV(rf, X, Y, opt, n_folds=10, stratify=True)         
     precisions, recalls, thresholds = precision_recall_curve(ys[0], ys[1])
     au_pr = average_precision_score(ys[0], ys[1], average='micro')
     plt.figure()
