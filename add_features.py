@@ -167,8 +167,6 @@ def find_motif_pattern(map_args, def_param=(scores1, scores2, pattern)):
                            "string",
                            "float64",
                            "string"])
-
-    tb.close(motif)
     
     # AGD: All further operations are directly on the feats DataFrames
     avg = sd = pat = 0
@@ -427,8 +425,6 @@ def do_peak_feat_row(map_args, def_param=(scores1,scores2)):
                            "float64",
                            "int64"])
 
-    tb.close(peaks)
-    
     score1 = choose_feat(feats1, "signalValue", opt)
     score2 = choose_feat(feats2, "signalValue", opt)
     lock.acquire()
