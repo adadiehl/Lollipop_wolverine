@@ -1,3 +1,5 @@
+# Modified by Adam Diehl (AGD) as noted
+
 import sys, re, os
 import numpy as np
 import bisect
@@ -6,44 +8,444 @@ import pandas as pd
 import HTSeq
 import operator
 import GenomeData
+import pyBigWig
 
-def prepare_interactions(data, chrom, i, start_list, distance_distal, distance_proximal):
+""" 
+  Added by AGD
+
+"""
+import tabix as tb
+import multiprocessing
+import ctypes
+
+
+"""
+Global Variables
+
+"""
+pattern = []
+scores1 = []
+scores2 = []
+lock = multiprocessing.Lock()
+
+
+def read_narrowPeak(peaks_f):
     """
-    This function is to prepare the potential interactions for one motif with all the downstream motifs within a certain
-    range.
-    i: the index of the particular summits in the motif list
-    start_list: the list of all the summits in one chrom,it's sorted
-    distance_distal/proximal: only the interactions whose lengh is in the range of [proximal, distal] will be kept.
-
-    Returned: a pandas data frame with 4 columns:
-    chrom+start1+start2+length
-    All the chroms and start1 will be identifcal with each other in this data frame.
-
+    Read a narrowPeak file into a pandas DataFrame
     """
+    peaks = pd.read_table(peaks_f ,
+                          header=None,
+                          names=["chrom",
+                                 "chromStart",
+                                 "chromEnd",
+                                 "name",
+                                 "score",
+                                 "strand",
+                                 "signalValue",
+                                 "pValue",
+                                 "qValue",
+                                 "peak"],
+                          dtype={"chrom": "string",
+                                 "chromStart": "int64",
+                                 "chromEnd": "int64",
+                                 "name": "string",
+                                 "score": "int64",
+                                 "strand": "string",
+                                 "signalValue": "float64",
+                                 "pValue": "float64",
+                                 "qValue": "float64",
+                                 "peak": "int64"})
+    return peaks
 
-    data1 = pd.DataFrame()
-    start1 = start_list[i]
-    chromosome = []
-    left = []
-    right = []
-    length = []
-    for j in xrange(i+1,len(start_list)):
-        start2 = start_list[j]
-        interval = start2 - start1
-        if (interval >= distance_proximal and interval <=  distance_distal):
-            chromosome.append(chrom)
-            left.append(int(start1))
-            right.append(int(start2))
-            length.append(int(interval))
-        else:
-            break
 
-    data1['chrom'] = pd.Series(chromosome)
-    data1['peak1'] = pd.Series(left)
-    data1['peak2'] = pd.Series(right)
-    data1['length'] = pd.Series(length)
+def _init_peaks(s1, s2):
+    """
+    Multiprocessing init function for narrowPeaks.
+    """
+    global scores1
+    global scores2
+    scores1 = s1
+    scores2 = s2
+    
+def _init_motifs(s1, s2, p):
+    """
+    Multiprocessing init function for motifs.
+    """
+    global scores1
+    global scores2
+    global pattern
+    scores1 = s1
+    scores2 = s2
+    pattern = p
+                                                        
 
-    data = pd.concat([data,data1],ignore_index=True)
+def get_features(chrom, start, end, feats_f, names, dtypes):
+    """
+    Get a pandas dataframe of features within a given anchor. Uses Tabix.
+    Added by AGD, 1/25/2018.
+
+    Input:
+        chrom = chromosome
+        start = chromStart
+        end = chromEnd
+        feats_f = Tabix file handle for feature annotation file.
+        names = list of column names for output tables.
+        dtypes = list of data types for each column.
+    Output:
+        A pandas dataframe for the given genomic interval, with column
+        names and types set accordingly.
+    """
+    if len(names) != len(dtypes):
+        sys.stderr.write("get_features: ERROR -- names and dtypes must have same length!\n")
+        exit(1)
+    feats = feats_f.querys( '{}:{}-{}'.format(chrom,
+                                              start,
+                                              end) )
+    # Convert to a pandas dataframe with the supplied column names
+    feats = pd.DataFrame(list(feats), columns = names)
+    # Convert datatypes for any numeric columns (strings should be fine as is)
+    for i in range(0, len(names)):
+        d = dtypes[i]
+        if d == 'int' or d == 'int64' or d == 'float' or d == 'float64':
+            feats[names[i]] = pd.to_numeric(feats[names[i]])
+    return feats
+    
+            
+def prepare_anchors(row, ext):
+    """
+    Added by AGD, 1/26/2018
+    Prepare a set of anchors from a pair of anchor summits.
+
+    Inputs:
+        row = a row from the training data table
+        ext = the number of bp to extend the peak up and downstream.
+    """
+    chrom = row['chrom1']
+    if ext > 0:
+        start1 = row['peak1'] - ext
+        start2 = row['peak2'] - ext
+        end1 = row['peak1'] + ext
+        end2 = row['peak2'] + ext
+    else:
+        start1 = row['start1']
+        start2 = row['start2']
+        end1 = row['end1']
+        end2 = row['end2']
+    anchor1 = HTSeq.GenomicInterval(chrom, start1, end1, '.')
+    anchor2 = HTSeq.GenomicInterval(chrom, start2, end2, '.')
+    return anchor1, anchor2
+                                
+
+def find_motif_pattern(map_args, def_param=(scores1, scores2, pattern)):
+    """
+     Input:
+         anchor = HTSeq.GenomicInterval(chrom,summit-ext, summit+ext,'.')
+         motif = {'chromXX':{start:(strand, score)}}
+     Output:
+         a tuple (pattern, avg_motif_strength, std_motif_strength)
+                                          
+     Rules to assign motif pattern:                                
+     1. Both anchors have no motif, assign 0;
+     2. One anchor has no motif, no matter how many motifs the other anchor may have, assign 1;
+     3. Both anchors have 1 motif: no ambuguity, divergent=2;tandem=3; convergent=4
+     4. Anchors have multiple motifs: in each anchor, choose the one with the highest motif strength 
+    """
+    (i, train, Peak, opt) = map_args
+    row = train.iloc[i]
+    anchor1, anchor2 = prepare_anchors(row, opt.motif_extension)
+    motif = tb.open(Peak)
+    
+    # AGD: Get motifs in range with call to Tabix-indexed motif file.
+    # feats1 and feats2 are pandas DataFrame objects with given column
+    # names and data types. No more inefficient loops!
+    feats1 = get_features(anchor1.chrom,
+                          anchor1.start,
+                          anchor1.end,
+                          motif,
+                          ["chrom",
+                           "start",
+                           "end",
+                           "name",
+                           "score",
+                           "strand"],
+                          ["string",
+                           "int64",
+                           "int64",
+                           "string",
+                           "float64",
+                           "string"])
+    feats2 = get_features(anchor2.chrom,
+                          anchor2.start,
+                          anchor2.end,
+                          motif,
+                          ["chrom",
+                           "start",
+                           "end",
+                           "name",
+                           "score",
+                           "strand"],
+                          ["string",
+                           "int64",
+                           "int64",
+                           "string",
+                           "float64",
+                           "string"])
+    # AGD: All further operations are directly on the feats DataFrames
+    avg = sd = pat = 0
+    if (feats1.shape[0] * feats2.shape[0]) == 0:
+        pat = 1
+        if feats1.shape[0] > 0:
+            avg = feats1.score.max()/2.0
+            sd = np.std([0, feats1.score.max()])
+        elif feats2.shape[0] > 0:
+            avg = feats2.score.max()/2.0
+            sd = np.std([0, feats2.score.max()])
+            # else no motifs -- avg = sd = pat = 0
+    else:
+        index1 = feats1.score.idxmax()
+        index2 = feats2.score.idxmax()
+        strand1 = feats1.strand.iloc[index1]
+        strand2 = feats2.strand.iloc[index2]
+        pat = assign_motif_pattern(strand1, strand2)
+        avg = np.mean( [feats1.score.max(), feats2.score.max()] )
+        sd = np.std( [feats1.score.max(), feats2.score.max()] )
+
+    lock.acquire()
+    scores1[i] = avg
+    scores2[i] = sd
+    pattern[i] = pat
+    lock.release()
+
+def add_motif_pattern(train, Peak, opt):
+    """
+    This function is to add the motif pattern feature for interacting anchors in training data.
+    Peak is the complete path for the table containing all these information for all motifs. The format is:
+    chrom + start + end + strand + pvalue + score + phastCon
+    Return a training data with added motif pattern feature
+    """
+    
+    base1 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores1 = np.ctypeslib.as_array(base1.get_obj())
+    base2 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores2 = np.ctypeslib.as_array(base2.get_obj())
+    base3 = multiprocessing.Array(ctypes.c_int, train.shape[0])
+    pattern = np.ctypeslib.as_array(base3.get_obj())
+    
+    # Create the multiprocessing thread pool
+    pool = multiprocessing.Pool(processes = opt.procs,
+                                initializer = _init_motifs,
+                                initargs = (scores1, scores2, pattern))
+    
+    map_args = []
+    for i in range(0,train.shape[0]):
+        map_args.append((i, train, Peak, opt))
+        
+    pool.map(find_motif_pattern, map_args)
+    pool.close()
+    pool.join()
+    
+    train['motif_pattern'] = pd.Series(pattern, index = train.index)
+    train['avg_motif_strength'] = pd.Series(scores1, index = train.index)
+    train['std_motif_strength'] = pd.Series(scores2, index = train.index)
+
+    return train
+
+
+def choose_feat(feats, col, opt):
+    """
+    Given a set of features and a selection criterion (in opt.collapse_peaks)
+    choose the "best" row or aggregate over all rows for given column, and return
+    the chosen value.
+    """
+    if feats.shape[0] == 0:
+        return 0
+    if opt.collapse_peaks == "max":
+        return feats[col].max()
+    if opt.collapse_peaks == "min":
+        return feats[col].min()
+    if opt.collapse_peaks == "sum":
+        return feats[col].sum()
+    if opt.collapse_peaks == "avg":
+        return feats[col].mean()
+
+
+def add_peak_feature(signal, train, BED, opt):
+    """
+    This function calculates signal values for narrowPeak features overlapping summit positions.
+    Added by AGD, 1/26/2018
+    """
+    base1 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores1 = np.ctypeslib.as_array(base1.get_obj())
+    base2 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores2 = np.ctypeslib.as_array(base2.get_obj())
+    
+    # Create the multiprocessing thread pool
+    pool = multiprocessing.Pool(processes = opt.procs,
+                                initializer = _init_peaks,
+                                initargs = (scores1, scores2))
+    
+    map_args = []
+    for i in range(0,train.shape[0]):
+        map_args.append((i, train, BED, opt))
+        
+    pool.map(do_peak_feat_row, map_args)
+    pool.close()
+    pool.join()
+    
+    signal1 = 'avg_'+str(signal)
+    signal2 = 'std_'+str(signal)
+    train[signal1] = pd.Series(scores1, index = train.index)
+    train[signal2] = pd.Series(scores2, index = train.index)
+    return train
+
+
+def do_peak_feat_row(map_args, def_param=(scores1,scores2)):
+    """
+    Loop definition for multithreading over table rows within add_peak_features.
+    """
+    (i, train, BED, opt) = map_args
+    peaks = tb.open(BED)
+    row = train.iloc[i]
+    anchor1, anchor2 = prepare_anchors(row, opt.extension)
+    
+    feats1 = get_features(anchor1.chrom,
+                          anchor1.start,
+                          anchor1.end,
+                          peaks,
+                          ["chrom",
+                           "chromStart",
+                           "chromEnd",
+                           "name",
+                           "score",
+                           "strand",
+                           "signalValue",
+                           "pValue",
+                           "qValue",
+                           "peak"],
+                          ["string",
+                           "int64",
+                           "int64",
+                           "string",
+                           "int64",
+                           "string",
+                           "float64",
+                           "float64",
+                           "float64",
+                           "int64"])
+    feats2 = get_features(anchor2.chrom,
+                          anchor2.start,
+                          anchor2.end,
+                          peaks,
+                          ["chrom",
+                           "chromStart",
+                           "chromEnd",
+                           "name",
+                           "score",
+                           "strand",
+                           "signalValue",
+                           "pValue",
+                           "qValue",
+                           "peak"],
+                          ["string",
+                           "int64",
+                           "int64",
+                           "string",
+                           "int64",
+                           "string",
+                           "float64",
+                           "float64",
+                           "float64",
+                           "int64"])
+    
+    score1 = choose_feat(feats1, "signalValue", opt)
+    score2 = choose_feat(feats2, "signalValue", opt)
+    lock.acquire()
+    scores1[i] = (score1+score2)/2.0
+    scores2[i] = np.std([score1, score2])
+    lock.release()
+                                                        
+    
+""" 
+  End added by AGD 
+
+"""
+
+
+def prepare_interactions(chrom, anchors, BED, proximal, distal, opt):
+    """
+    This function is to prepare the potential interactions for all peaks on one chromosome  
+    with all the downnstream peaks on the same chromosome. Assumes that anchors is a pandas
+    dataframe read in by read_narrowPeak, and BED is the Tabix-indexed narrowPeak file
+    containing the same peaks stored in the anchors table. Returns a pandas dataFrame
+    following bedpe column conventions.
+    """
+    data = pd.DataFrame(columns=['chrom1',
+                                 'start1',
+                                 'end1',
+                                 'chrom2',
+                                 'start2',
+                                 'end2',
+                                 'name',
+                                 'score',
+                                 'strand1',
+                                 'strand2',
+                                 'peak1',
+                                 'peak2',
+                                 'length'])
+    for idx, anchor in anchors.iterrows():            
+        peaks = tb.open(BED)
+        feats = get_features(anchor.chrom,
+                             anchor.chromStart + anchor.peak + proximal,
+                             anchor.chromStart + anchor.peak + distal,
+                             peaks,
+                             ["chrom",
+                              "chromStart",
+                              "chromEnd",
+                              "name",
+                              "score",
+                              "strand",
+                              "signalValue",
+                              "pValue",
+                              "qValue",
+                              "peak"],
+                             ["string",
+                              "int64",
+                              "int64",
+                              "string",
+                              "int64",
+                              "string",
+                              "float64",
+                              "float64",
+                              "float64",
+                              "int64"])
+
+        data1 = pd.DataFrame(columns=['chrom1',
+                                      'start1',
+                                      'end1',
+                                      'chrom2',
+                                      'start2',
+                                      'end2',
+                                      'name',
+                                      'score',
+                                      'strand1',
+                                      'strand2',
+                                      'peak1',
+                                      'peak2',
+                                      'length'])
+        data1['start2'] = feats.chromStart
+        data1['end2'] = feats.chromEnd
+        data1['peak2'] = feats.chromStart + feats.peak
+        data1['peak1'] = anchor.chromStart + anchor.peak
+        data1['name'] = 'NA'
+        data1['chrom1'] = data1['chrom2'] = chrom
+        data1['start1'] = anchor.chromStart
+        data1['end1'] = anchor.chromEnd
+        data1['score'] = 0
+        data1['strand1'] = data1['strand2'] = '.'        
+        data1['length'] = data1['peak2'] - data1['peak1']
+        
+        data = pd.concat([data,data1],ignore_index=True)
+        
     return data
 
 
@@ -60,9 +462,10 @@ def prepare_reads_info(signal_table):
     shift = 75   # half of the fragment size
     for index, row in signal_table.iterrows():
         factor = row['Signal']
-        BED = row['BED']
-        if (factor  != 'Motif' and factor != 'Gene expression' and factor != 'PhastCon'):
-            BED_reader = open(BED,'r')
+        Format = row['Format']
+        Path = row['Path']
+        if (factor == 'Reads'):
+            BED_reader = open(Path,'r')
             read_info[factor] = {}
             read_number = 0
             for line in BED_reader:
@@ -90,7 +493,6 @@ def prepare_reads_info(signal_table):
     return (read_info, read_numbers)
 
 
-
 def assign_motif_pattern(strand1, strand2):
     if (strand1 == '-' and strand2 == '+'):
         return '2'
@@ -100,171 +502,82 @@ def assign_motif_pattern(strand1, strand2):
         return '3'
 
 
-def find_motif_pattern(anchor1, anchor2, motif):
+def add_bigWig_feature(train, Peak, opt):
     """
-     Input:
-         anchor = HTSeq.GenomicInterval(chrom,summit-ext, summit+ext,'.')
-         motif = {'chromXX':{start:(strand, score)}}
-     Output:
-         a tuple (pattern, avg_motif_strength, std_motif_strength)
-     Rules to assign motif pattern:
-     1. Both anchors have no motif, assign 0;
-     2. One anchor has no motif, no matter how many motifs the other anchor may have, assign 1;
-     3. Both anchors have 1 motif: no ambuguity, divergent=2;tandem=3; convergent=4
-     4. Anchors have multiple motifs: in each anchor, choose the one with the highest motif strength
+    Adds scores from bigWig features.
     """
-    chrom = anchor1.chrom
+    base1 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores1 = np.ctypeslib.as_array(base1.get_obj())
+    base2 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores2 = np.ctypeslib.as_array(base2.get_obj())
 
-    starts = list(motif[chrom].keys())
+    # Create the multiprocessing thread pool
+    pool = multiprocessing.Pool(processes = opt.procs,
+                                initializer = _init_peaks,
+                                initargs = (scores1, scores2))
 
-    num1 = 0
-    starts1 = []
-    scores1 = []
-    for start in starts:
-        if start >= anchor1.start and start <= anchor1.end:
-            num1 += 1
-            starts1.append(start)
-            scores1.append(motif[chrom][start][1])
-    num2 = 0
-    starts2 = []
-    scores2 = []
-    for start in starts:
-        if start >= anchor2.start and start <= anchor2.end:
-            num2 += 1
-            starts2.append(start)
-            scores2.append(motif[chrom][start][1])
+    map_args = []
+    for i in range(0,train.shape[0]):
+        map_args.append((i, train, Peak, opt))
 
-    if num1 ==0 and num2 == 0:
-        return (0,0,0)
-    else:
-        if (num1*num2 == 0):
-            if num1 == 0:
-                return (1, max(scores2)/2.0, np.std([0, max(scores2)]))
-            else:
-                return (1, max(scores1)/2.0, np.std([0, max(scores1)]))
-        else:
-            if (num1 == 1 and num2 == 1):
-                strand1 = motif[chrom][starts1[0]][0]
-                strand2 = motif[chrom][starts2[0]][0]
-                pattern = assign_motif_pattern(strand1, strand2)
-                return (pattern, np.mean([max(scores1),max(scores2)]), np.std([max(scores1),max(scores2)]))
-            else:
-                index1 = scores1.index(max(scores1))
-                strand1 = motif[chrom][starts1[index1]][0]
-                index2 = scores2.index(max(scores2))
-                strand2 = motif[chrom][starts2[index2]][0]
-                pattern = assign_motif_pattern(strand1, strand2)
-                return (pattern, np.mean([max(scores1),max(scores2)]), np.std([max(scores1),max(scores2)]))
+    pool.map(get_bigWig_scores, map_args)
+    pool.close()
+    pool.join()
 
-
-def add_motif_pattern(train, Peak):
-    """
-    This function is to add the motif pattern feature for interacting anchors in training data.
-    Peak is the complete path for the table containing all these information for all motifs. The format is:
-    chrom + start + end + strand + pvalue + score + phastCon
-    Return the data with added motif pattern feature and motif strength
-    """
-    info = pd.read_table(Peak)
-    motif = {}  # motif = {'chromXX':{start:(strand, score)}}
-    for index, row in info.iterrows():
-        chrom = row['chrom']
-        start = row['start']
-        strand = row['strand']
-        score = row['score']
-
-        if chrom not in motif.keys():
-            motif[chrom] = {}
-        motif[chrom][start] = (strand, score)
-
-    motif_pattern = []
-    avg_motif_strength_list = []
-    std_motif_strength_list = []
-
-    for index, row in train.iterrows():
-        chrom = row['chrom']
-        start1 = row['peak1']
-        ext = 500
-        anchor1 = HTSeq.GenomicInterval(chrom, start1-ext, start1+ext, '.')
-        start2 = row['peak2']
-        anchor2 = HTSeq.GenomicInterval(chrom, start2-ext, start2+ext, '.')
-
-        (pattern, avg_motif_strength, std_motif_strength) = find_motif_pattern(anchor1, anchor2, motif)
-        motif_pattern.append(pattern)
-        avg_motif_strength_list.append(avg_motif_strength)
-        std_motif_strength_list.append(std_motif_strength)
-
-    train['motif_pattern'] = pd.Series(motif_pattern, index = train.index)
-    train['avg_motif_strength'] = pd.Series(avg_motif_strength_list, index = train.index)
-    train['std_motif_strength'] = pd.Series(std_motif_strength_list, index = train.index)
-    return train
-
-
-def add_anchor_conservation(train, chrom, Peak):
-    """
-    To add the feature of sequence conservation on anchors.
-    Peak is the folder that contains the phastCon.wig files of all chroms.
-    The name format of PhastCon of each chrom is chrXX.phastCons100way.wigFix
-    """
-    starts = {}
-    cvg = {}
-
-    ext = 20
-    print 'Read in phastCon in '+chrom+'...'
-
-    # Read in the phastCon track
-    cvg = [0]*GenomeData.hg19_chrom_lengths[chrom]
-    phastCon = Peak+'/'+chrom+'.phastCons100way.wigFix'
-    wiggle = open(phastCon,'r')
-    for line in wiggle:
-        if line[0] == 'f':
-            i = 0
-            start = int(line.strip().split(' ')[2].split('=')[1])
-        else:
-            signal = line.strip().split(' ')[0]
-            if signal == 'NA':
-                signal = 0
-            else:
-                signal = float(signal)
-            cvg[start + i] = signal
-            i += 1
-    wiggle.close()
-
-    AvgCons = []
-    DevCons = []
-    for index, row in train.iterrows():
-        con1 = sum(cvg[(int(row['peak1'])-ext): (int(row['peak1'])+ext)])
-        con2 = sum(cvg[(int(row['peak2'])-ext): (int(row['peak2'])+ext)])
-        AvgCons.append((con1+con2)/2.0)
-        DevCons.append(np.std([con1, con2]))
-    train['avg_conservation'] = pd.Series(AvgCons)
-    train['std_conservation'] = pd.Series(DevCons)
+    train['avg_conservation'] = pd.Series(scores1)
+    train['std_conservation'] = pd.Series(scores2)
 
     return train
+    
+def get_bigWig_scores(map_args, def_param=(scores1,scores2)):
+    """
+    Inner loop for multithreading over bigWig score features.
+    """
+    (i, train, Peak, opt) = map_args
+    bw = pyBigWig.open(Peak)
+    row = train.iloc[i]
+    anchor1, anchor2 = prepare_anchors(row, opt.cons_extension)
+    con1 = sum(bw.values(anchor1.chrom,
+                         anchor1.start,
+                         anchor1.end))
+    con2 = sum(bw.values(anchor2.chrom,
+                         anchor2.start,
+                         anchor2.end))
+    lock.acquire()
+    scores1[i] = (con1+con2)/2.0
+    scores2[i] = np.std([con1, con2])
+    lock.release()
 
 
-def add_features(data, anchor_motifs, read_info, read_numbers, signals):
+def add_features(data, anchor_motifs, read_info, read_numbers, signal):
     """
     This function is to add both the local and inbetween features to the data.
     read_info = {factor:{chrom:[start1, start2, start3]}}
     inbetween_signals = {factor:{'ChrXX':{summit:peak_height}}}
     anchor_motifs = {'chrXX':[start1, start2...]}
     """
+    # Make this configurable
     extension = 2000
 
-    for factor in signals:
+    # To do: remove unnecessary loop.
+    for factor in signal:
         print "Preparing features for "+str(factor)+'...'
+
         avg_signal = 'avg_'+str(factor)
         std_signal = 'std_'+str(factor)
-        inbetween_signal = str(factor)+'_in-between';upstream_signal = str(factor)+'_upstream';downstream_signal = str(factor)+'_downstream'
+        inbetween_signal = str(factor)+'_in-between'
+        upstream_signal = str(factor)+'_upstream'
+        downstream_signal = str(factor)+'_downstream'
 
         reads = read_info[factor]
         read_number = read_numbers[factor]
+
         anchor1_RPKM = []
         anchor2_RPKM = []
         in_between = [];upstream = [];downstream = []
 
         for index, row in data.iterrows():
-            chrom = row['chrom']
+            chrom = row['chrom1']
             start1 = int(row['peak1'])
             start2 = int(row['peak2'])
 
@@ -305,44 +618,42 @@ def add_features(data, anchor_motifs, read_info, read_numbers, signals):
         data[downstream_signal] = pd.Series(downstream, index = data.index)
     return data
 
-def add_gene_expression(data, signal_table):
+def add_gene_expression(data, Peak):
     """
     This function is to add the gene expression value of the looped region as a feature.The gene expression file's format is:
     gene_id   locus   value
     A1BG    chr19:coordinate1-coordiate2   1.31
 
     """
-    for index,row in signal_table.iterrows():
-        if row['Signal'] == 'Gene expression':
-            print 'Preparing features for gene expression...'
-            exp_file = pd.read_table(row['Peak'])
-            gene_exp = {}  # {'chrom':{iv1:fpkm1,iv2:fpkm2...}}
-            for index, row in exp_file.iterrows():
-                gene = row['gene_id']
-                region = row['locus']
-                fpkm = row['value']
-                chrom = region.split(':')[0]
-                start = int(region.split(':')[1].split('-')[0])
-                end = int(region.split(':')[1].split('-')[1])
-                iv = HTSeq.GenomicInterval(chrom, start, end, '.')
-                if chrom not in gene_exp.keys():
-                    gene_exp[chrom] = {}
-                gene_exp[chrom][iv] = fpkm
-            loop_expressions = []
-            for index, row in data.iterrows():
-                chrom = row['chrom']
-                start1 = row['peak1']
-                start2 = row['peak2']
-                iv = HTSeq.GenomicInterval(chrom, start1, start2)
-                loop_expression = 0
-                for gene in gene_exp[chrom].keys():
-                    if gene.overlaps(iv):
-                        loop_expression += gene_exp[chrom][gene]
-                loop_expressions.append(loop_expression)
-            data['expression'] = pd.Series(loop_expressions, index = data.index)
+    print 'Preparing features for gene expression...'
+    exp_file = pd.read_table(Peak)
+    gene_exp = {}  # {'chrom':{iv1:fpkm1,iv2:fpkm2...}}
+    for index, row in exp_file.iterrows():
+        gene = row['gene_id']
+        region = row['locus']
+        fpkm = row['value']
+        chrom = region.split(':')[0]
+        start = int(region.split(':')[1].split('-')[0])
+        end = int(region.split(':')[1].split('-')[1])
+        iv = HTSeq.GenomicInterval(chrom, start, end, '.')
+        if chrom not in gene_exp.keys():
+            gene_exp[chrom] = {}
+        gene_exp[chrom][iv] = fpkm
+    loop_expressions = []
+    for index, row in data.iterrows():
+        chrom = row['chrom1']
+        start1 = row['peak1']
+        start2 = row['peak2']
+        iv = HTSeq.GenomicInterval(chrom, start1, start2)
+        loop_expression = 0
+        for gene in gene_exp[chrom].keys():
+            if gene.overlaps(iv):
+                loop_expression += gene_exp[chrom][gene]
+        loop_expressions.append(loop_expression)
+    data['expression'] = pd.Series(loop_expressions, index = data.index)
     return data
 
-def prepare_features_for_interactions(data, summits, signal_table, raw_features):
+def prepare_features_for_interactions(data, summits, signal_table, read_info, read_numbers, opt):
     """
 
     data is a pandas dataframe with chrom+start1+start2+length.
@@ -351,14 +662,30 @@ def prepare_features_for_interactions(data, summits, signal_table, raw_features)
     motifs_info = {'chromXX':{start:(strand, score, phastCon)}}
     signals is a list of available factors with the same order as in the signal_table
     """
+    for index, row in signal_table.iterrows():
+        signal = row['Signal']
+        Format = row['Format']
+        Path = row['Path']
 
-    signals = raw_features[0]
-    read_info = raw_features[1]
-    read_numbers = raw_features[2]
-
-    data = add_features(data, summits, read_info, read_numbers, signals)
-    data = add_gene_expression(data, signal_table)
-
+        if signal == 'Motif':  # AGD: Don't use parens around conditionals
+            sys.stderr.write("\tAdding motif annotations...\n")
+            data = add_motif_pattern(data, Path, opt)
+            
+            # AGD: Removed redundant loop through info_table
+        elif signal == 'PhastCon':
+            sys.stderr.write("\tAdding PhastCons conservation...\n")
+            data = add_bigWig_feature(data, Path, opt)
+        elif signal == 'Gene expression':
+            sys.stderr.write("\tAdding gene expression...\n")
+            data = add_gene_expression(data, Path, opt)
+        else:
+            sys.stderr.write("\tProcessing {} features...\n".format(signal))
+            if Format == 'bed':
+                #data = add_local_feature(signal, data, Path)
+                #data = add_regional_feature_by_reads(signal, data, anchors, Path)
+                data = add_features(data, summits, read_info, read_numbers, signal, opt)
+            elif Format == 'narrowPeak':
+                data = add_peak_feature(signal, data, Path, opt)
 
     return data
 

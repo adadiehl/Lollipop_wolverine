@@ -91,8 +91,8 @@ def main(argv):
     num_neg = data[data['response'] == 0].shape[0]
     n2p = float(num_neg)/float(num_pos)
     print 'Negative samples were '+str(n2p)+' times more than the positive loops...'
-    
-    X = data.iloc[:,4:].as_matrix()
+
+    X = data.iloc[:,13:].as_matrix()
     Y = np.array(data['response'])
 
     # Use Random Forest classifier to predict interactions
