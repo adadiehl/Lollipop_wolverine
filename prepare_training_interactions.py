@@ -157,7 +157,13 @@ def main(argv):
     parser.add_option("-a", "--chiapet", action="store", type="string", dest="chiapet", metavar="<file>", help="the interaction file from ChIA-PET experiment")
     parser.add_option("-c", "--hic", action="store", type="string", dest="hic", metavar="<file>", help="the CTCF interactions identified by hic data")
     parser.add_option("-o", "--train", action="store", type="string", dest="training", metavar="<file>", help="the resulting file with positive and sampled negative interactions for training")
-
+    parser.add_option('-l', '--min_loop_size', type=int, default=10000,
+                      help="Minimum loop size.")
+    parser.add_option('-u', '--max_loop_size', type=int, default=1000000,
+                      help="Maximum loop size.")
+    parser.add_option('-r', '--ratio', type=int, default=5,
+                      help="Ratio of negative to positive interactions. Default 5.")
+    
     (opt, args) = parser.parse_args(argv)
     if len(argv) < 8:
         parser.print_help()
@@ -166,10 +172,6 @@ def main(argv):
 
     chroms = GenomeData.hg19_chroms
     outfile = open(opt.training,'w')
-
-    # The length constraint of loops
-    minLength = 10000
-    maxLength = 1000000
 
     true_loops = {} #true_interaction = {'chrXX':[(summit1,summit2),(summit1,summit2)...]}
     less_sig_loops = {} # To ensure a negative loops is not a less significant true loop.less_sig_loops = {'chrXX':[(summit1,summit2),(summit1,summit2)...]}
@@ -181,7 +183,7 @@ def main(argv):
     hic_loops = read_hic(opt.hic, bs_pool)
 
     NumPos, true_loops, less_sig_loops = find_positive_interactions(opt.chiapet, hic_loops, bs_pool, chroms, outfile, opt)
-    Ratio = 5 # Ratio = 5 means 5 negative interaction will be generated for each positive interaction.
+    Ratio = opt.ratio # Ratio = 5 means 5 negative interaction will be generated for each positive interaction.
     NumNeg = len(loop_length)*Ratio # NumNeg is the totoal number of negative interactions.          
 
     # Print the header
@@ -191,7 +193,9 @@ def main(argv):
                                             'response',
                                             'length'))
     
-    negative_interactions, total = prepare_negative_interactions(true_loops, hic_loops, bs_pool, minLength, maxLength, opt)
+    negative_interactions, total = prepare_negative_interactions(true_loops, hic_loops, bs_pool,
+                                                                 opt.min_loop_size, opt.max_loop_size,
+                                                                 opt)
     print 'There are '+str(total)+' negative loops in total'
 
     selected_neg = np.random.choice(negative_interactions, NumNeg, replace=False)
