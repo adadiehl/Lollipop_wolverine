@@ -53,6 +53,35 @@ def _init_motifs(s1, s2, p):
     pattern = p
 
 
+def read_narrowPeak(peaks_f):
+    """
+    Read a narrowPeak file into a pandas DataFrame
+    """
+    peaks = pd.read_table(peaks_f ,
+                          header=None,
+                          names=["chrom",
+                                 "chromStart",
+                                 "chromEnd",
+                                 "name",
+                                 "score",
+                                 "strand",
+                                 "signalValue",
+                                 "pValue",
+                                 "qValue",
+                                 "peak"],
+                          dtype={"chrom": "string",
+                                 "chromStart": "int64",
+                                 "chromEnd": "int64",
+                                 "name": "string",
+                                 "score": "int64",
+                                 "strand": "string",
+                                 "signalValue": "float64",
+                                 "pValue": "float64",
+                                 "qValue": "float64",
+                                 "peak": "int64"})
+    return peaks
+
+
 def get_features(chrom, start, end, feats_f, names, dtypes):
     """
     Get a pandas dataframe of features within a given anchor. Uses Tabix.
