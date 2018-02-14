@@ -15,6 +15,7 @@ import math
 import pandas as pd
 import HTSeq
 from optparse import OptionParser
+from lib import read_narrowPeak
 
 def find_summits_in_anchors(anchor, chrom_summits):
     """
