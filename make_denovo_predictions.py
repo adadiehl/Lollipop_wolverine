@@ -20,6 +20,22 @@ def main(argv):
     parser.add_option("-t", "--table", action="store", type="string", dest="info_table", metavar="<file>", help="the infomation table contains the paths of necessary files.")
     parser.add_option("-c", "--clf", action="store", type="string", dest="clf", metavar="<file>", help="The trained classifier for identifying the interacting loop pairs")
     parser.add_option("-o", "--outdir", action="store", type="string", dest="outdir", help="The directory for output files, predicted loops, etc")
+    parser.add_option('-p', '--procs', type=int, default=1,
+                      help='Number of processors to use. Default 1.')
+    parser.add_option('-u', '--proximal', type=int, default=10000,
+                      help='Minimum distance between upstream and downstream loop anchors. Default 10,000.')
+    parser.add_option('-d', '--distal', type=int, default=1e+6,
+                      help='Maximum distance between upstream and downstream loop anchors. Default 1e+6.')
+    parser.add_option('-e', '--extension', type=int, default=2000,
+                      help='Size of the extesion window to append up and downstream of each anchor peak for signal calculation. Default 2000 (as in original).')
+    parser.add_option('-m', '--motif_extension', type=int, default=500,
+                      help='Size of extension window to append when finding motif features. Default 500.')
+    parser.add_option('-z', '--cons_extension', type=int, default=20,
+                      help='Size of extension window to append when calculating conservation. Default 20.')
+    parser.add_option('-a', '--collapse_peaks', type='choice', choices=["max", "avg", "min", "sum"], default='max',
+                      help='How to handle multiple overlapping peak features. Allowed values: max (use maximum score), avg (average all scores), min (use lowest score), sum (use sum of all scores). Default = max.')
+    parser.add_option('-f', '--ctcf_f', type='string', help='Tabix-indexed CTCF peaks file in narrowPeak format.')
+    
 
     (opt, args) = parser.parse_args(argv)
     if len(argv) < 8:
@@ -58,7 +74,7 @@ def main(argv):
     chroms = summits.keys()
 
     print 'Preparing reads information...'
-    (read_info, read_numbers) = lib.prepare_reads_info(signal_table)
+    read_info, read_numbers = lib.prepare_reads_info(signal_table)
 
     distance_distal = 1e+6
     distance_proximal = 10000  # We focus on long-range interactions between [10kb,1mb]
@@ -76,13 +92,16 @@ def main(argv):
         data = pd.DataFrame(columns=['chrom','peak1','peak2','length'])
         for i in xrange(len(summits[chrom])-1):
             data = lib.prepare_interactions(data, chrom, i, summits[chrom], distance_distal, distance_proximal)
-
+        """
         print "Preparing motif orientation pattern and strength..."
         data = lib.add_motif_pattern(data, signal_table.iloc[0,2])
         print 'Preparing sequence conservation feature...'
         data = lib.add_anchor_conservation(data, chrom, signal_table.iloc[1,2])
 
         data = lib.prepare_features_for_interactions(data, summits, signal_table, raw_features)
+        """
+        data = lib.prepare_features_for_interactions(data, summits, signal_table, read_info, read_numbers, opt)
+        
         X = data.iloc[:,3:].as_matrix()
         y = loop_clf.predict(X[:,:])
         probas = loop_clf.predict_proba(X[:,:]) # probas is an array of shape [n_samples, n_classes]

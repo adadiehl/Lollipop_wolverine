@@ -65,7 +65,6 @@ def prepare_anchors(row, ext):
     """
     chrom = row['chrom']
     start1 = row['start1']
-    ext = 500
     anchor1 = HTSeq.GenomicInterval(chrom, start1-ext, start1+ext, '.')
     start2 = row['start2']
     anchor2 = HTSeq.GenomicInterval(chrom, start2-ext, start2+ext, '.')
