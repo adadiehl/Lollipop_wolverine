@@ -33,6 +33,108 @@ def find_summits_in_anchors(anchor, chrom_summits):
         ans = (anchor.start + anchor.end)/2
     return str(ans)
 
+
+def prepare_bs_pool(peak_f, chroms):
+    """
+    Prepare the ChIP-seq binding site pool.
+    bs_pool = {'chrom':[summit1, summit2,...]}
+    """
+
+    peak = read_narrowPeak(peak_f)
+    bs_pool = {}
+    for chrom in peak.chrom.unique():
+        if chrom in chroms and chrom != 'chrY':
+            bs_pool[chrom] = peak[peak['chrom'] == chrom].peak + peak[peak['chrom'] == chrom].chromStart
+            bs_pool[chrom] = bs_pool[chrom].sort_values(ascending=1)
+    return bs_pool
+
+
+def read_hic(hic_f, bs_pool):
+    """
+    Read in Hi-C data.
+    """
+    hic = pd.read_table(hic_f)
+    hic_loops = {}
+    for index, row in hic.iterrows():
+        chrom = row['chrom']
+        anchor1 = HTSeq.GenomicInterval(chrom, row['start1']-1000, row['start1']+1000, '.')
+        anchor2 = HTSeq.GenomicInterval(chrom, row['start2']-1000, row['start2']+1000,'.')
+        if chrom not in hic_loops.keys():
+            hic_loops[chrom] = []
+        anchor1_summit = find_summits_in_anchors(anchor1, bs_pool[chrom])
+        anchor2_summit = find_summits_in_anchors(anchor2, bs_pool[chrom])
+        hic_loops[chrom].append((anchor1_summit,anchor2_summit))
+    return hic_loops
+
+
+def find_positive_interactions(chiapet, hic_loops, bs_pool, chroms, outfile, opt):
+    """
+    Find positive interactions in the ChIA-PET data and prepare the
+    true_loops and less_sig_loops lists.
+
+    true_loops = {'chrXX':[(summit1,summit2),(summit1,summit2)...]}
+    less_sig_loops = {'chrXX':[(summit1,summit2),(summit1,summit2)...]}
+    To ensure negative loops are not less significant true loops.
+    TO-DO: Make Hi-C data optional
+    """
+    NumPos = 0
+    true_loops = {}
+    less_sig_loops = {}
+    
+    chia = pd.read_table(chiapet)
+    for index, row in chia.iterrows():
+        IAB = row['IAB']
+        FDR = row['FDR']
+        if (row['chrom1'] == row['chrom2'] and row['chrom1'] in chroms and row['chrom1'] != 'chrY'):
+            chrom = row['chrom1']
+            anchor1 = HTSeq.GenomicInterval(chrom, row['start1'], row['end1'],'.')
+            anchor2 = HTSeq.GenomicInterval(chrom, row['start2'], row['end2'],'.')
+            # Get the summit position of the anchors
+            if chrom in bs_pool.keys():
+                anchor1_summit = find_summits_in_anchors(anchor1, bs_pool[chrom])
+                anchor2_summit = find_summits_in_anchors(anchor2, bs_pool[chrom])
+            else:
+                anchor1_summit = 'NaN'
+                anchor2_summit = 'NaN'
+        # distance is the genomic length between the two motifs. To focus on long-range interactions,
+        # we required that distance >= 10kb and <= 1m
+        if (anchor1_summit != 'NaN' and anchor2_summit != 'NaN'):
+            if (int(anchor1_summit) > int(anchor2_summit)):
+                temp = anchor1_summit
+                anchor1_summit = anchor2_summit
+                anchor2_summit = temp
+            distance = int(anchor2_summit) - int(anchor1_summit)
+            
+        if (distance >= opt.min_loop_size and distance <= opt.max_loop_size):
+            if (IAB >= 2 and FDR <= 0.05):
+                NumPos += 1
+                if chrom not in true_loops.keys():
+                    true_loops[chrom] = []
+                    
+                true_loops[chrom].append((int(anchor1_summit), int(anchor2_summit)))
+                outfile.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(chrom,
+                                                                                                row['start1'],
+                                                                                                row['end1'],
+                                                                                                chrom,
+                                                                                                row['start2'],
+                                                                                                row['end2'],
+                                                                                                'NA',
+                                                                                                float(1),
+                                                                                                '.',
+                                                                                                '.',
+                                                                                                anchor1_summit,
+                                                                                                anchor2_summit,
+                                                                                                1,
+                                                                                                distance))
+                else:
+                    if chrom not in less_sig_loops.keys():
+                        less_sig_loops[chrom] = []
+                        less_sig_loops[chrom].append((int(anchor1_summit), int(anchor2_summit)))
+                        
+    return NumPos, true_loops, less_sig_loops
+                    
+
+
 def main(argv):
     parser = OptionParser()
     parser.add_option("-p", "--peak", action="store", type="string", dest="peak", metavar="<file>", help="the CTCF peaks or summits in BED format")
@@ -46,7 +148,6 @@ def main(argv):
         sys.exit(1)
 
 
-    peak = pd.read_table(opt.peak, header=None)
     chia = pd.read_table(opt.chiapet)
     hic = pd.read_table(opt.hic)
     chroms = GenomeData.hg19_chroms
@@ -58,21 +159,8 @@ def main(argv):
 
     true_loops = {} #true_interaction = {'chrXX':[(summit1,summit2),(summit1,summit2)...]}
     less_sig_loops = {} # To ensure a negative loops is not a less significant true loop.less_sig_loops = {'chrXX':[(summit1,summit2),(summit1,summit2)...]}
-    bs_pool = {} # the binding sites pool for generating the negative loops. bs_pool = {'chrom':[summit1, summit2,...]}
 
-    for index, row in peak.iterrows():
-        chrom = row[0]
-        if chrom in chroms and chrom != 'chrY':
-            if chrom not in bs_pool.keys():
-                bs_pool[chrom] = []
-            summit = (row[1]+row[2])/2
-            bs_pool[chrom].append(summit)
-
-
-
-    # Sort the binding site list
-    for chrom in bs_pool.keys():
-        bs_pool[chrom].sort()
+    bs_pool = prepare_bs_pool(opt.peak, chroms)
 
     # get the hic loops. HiC loops are used as a supplementary file to ensure that the randomly generated negative loops are not true loops identified in HiC.
     hic_loops = {}
@@ -86,8 +174,13 @@ def main(argv):
         anchor2_summit = find_summits_in_anchors(anchor2, bs_pool[chrom])
         hic_loops[chrom].append((anchor1_summit,anchor2_summit))
 
-    outline = 'chrom'+'\t'+'start1'+'\t'+'start2'+'\t'+'response'+'\t'+'length'+'\n'
-    outfile.write(outline)
+    # Print the header
+    outfile.write('{}\t{}\t{}\t{}\n'.format('chrom',
+                                            'peak1',
+                                            'peak2',
+                                            'response',
+                                            'length'))
+
     loop_length = []
 
     for index, row in chia.iterrows():
