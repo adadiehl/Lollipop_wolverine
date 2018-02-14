@@ -125,6 +125,31 @@ def find_positive_interactions(chiapet, hic_loops, bs_pool, chroms, outfile, opt
     return NumPos, true_loops, less_sig_loops
                     
 
+def prepare_negative_interactions(true_loops, hic_loops, bs_pool, minLength, maxLength, opt):
+    """
+    Prepare negative training interactions based on the binding site pool,
+    positive interaction, and hi-c loops.
+    """
+    negative_interactions = []
+    total = 0
+    for chrom in true_loops.keys():
+        for i_left in xrange(len(bs_pool[chrom])-1):
+            m_left = bs_pool[chrom][i_left]
+            for i_right in xrange(i_left+1, len(bs_pool[chrom])):
+                m_right = bs_pool[chrom][i_right]
+                length = m_right - m_left
+                if length >= minLength and length <= maxLength and (m_left, m_right) not in true_loops[chrom]:
+                    if chrom in less_sig_loops.keys():
+                        if (m_left, m_right) not in less_sig_loops[chrom]:
+                            iv = HTSeq.GenomicInterval(chrom, m_left, m_right, '.')
+                            negative_interactions.append(iv)
+                            total += 1
+                    else:
+                        iv = HTSeq.GenomicInterval(chrom, m_left, m_right, '.')
+                        negative_interactions.append(iv)
+                        total += 1
+    return negative_interactions, total
+
 
 def main(argv):
     parser = OptionParser()
@@ -166,29 +191,8 @@ def main(argv):
                                             'response',
                                             'length'))
     
-    negative_interactions = []
-    selected_neg = []
-    # Generate the negative interactions pool
-    total = 0
-    for chrom in true_loops.keys():
-        for i_left in xrange(len(bs_pool[chrom])-1):
-            m_left = bs_pool[chrom][i_left]
-            for i_right in xrange(i_left+1, len(bs_pool[chrom])):
-                m_right = bs_pool[chrom][i_right]
-                length = m_right - m_left
-                if length >= minLength and length <= maxLength and (m_left, m_right) not in true_loops[chrom]:
-                    if chrom in less_sig_loops.keys():
-                        if (m_left, m_right) not in less_sig_loops[chrom]:
-                            iv = HTSeq.GenomicInterval(chrom, m_left, m_right, '.')
-                            negative_interactions.append(iv)
-                            total += 1
-                    else:
-                        iv = HTSeq.GenomicInterval(chrom, m_left, m_right, '.')
-                        negative_interactions.append(iv)
-                        total += 1
+    negative_interactions, total = prepare_negative_interactions(true_loops, hic_loops, bs_pool, minLength, maxLength, opt)
     print 'There are '+str(total)+' negative loops in total'
-
-
 
     selected_neg = np.random.choice(negative_interactions, NumNeg, replace=False)
     for iv in selected_neg:
