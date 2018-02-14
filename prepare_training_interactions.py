@@ -96,36 +96,27 @@ def find_positive_interactions(chiapet, hic_loops, bs_pool, chroms, outfile, opt
             else:
                 anchor1_summit = 'NaN'
                 anchor2_summit = 'NaN'
-        # distance is the genomic length between the two motifs. To focus on long-range interactions,
-        # we required that distance >= 10kb and <= 1m
-        if (anchor1_summit != 'NaN' and anchor2_summit != 'NaN'):
-            if (int(anchor1_summit) > int(anchor2_summit)):
-                temp = anchor1_summit
-                anchor1_summit = anchor2_summit
-                anchor2_summit = temp
-            distance = int(anchor2_summit) - int(anchor1_summit)
+            # distance is the genomic length between the two motifs. To focus on long-range interactions,
+            # we required that distance >= 10kb and <= 1m
+            if (anchor1_summit != 'NaN' and anchor2_summit != 'NaN'):
+                if (int(anchor1_summit) > int(anchor2_summit)):
+                    temp = anchor1_summit
+                    anchor1_summit = anchor2_summit
+                    anchor2_summit = temp
+                distance = int(anchor2_summit) - int(anchor1_summit)
             
-        if (distance >= opt.min_loop_size and distance <= opt.max_loop_size):
-            if (IAB >= 2 and FDR <= 0.05):
-                NumPos += 1
-                if chrom not in true_loops.keys():
-                    true_loops[chrom] = []
+                if (distance >= opt.min_loop_size and distance <= opt.max_loop_size):
+                    if (IAB >= 2 and FDR <= 0.05):
+                        NumPos += 1
+                        if chrom not in true_loops.keys():
+                            true_loops[chrom] = []
                     
-                true_loops[chrom].append((int(anchor1_summit), int(anchor2_summit)))
-                outfile.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(chrom,
-                                                                                                row['start1'],
-                                                                                                row['end1'],
-                                                                                                chrom,
-                                                                                                row['start2'],
-                                                                                                row['end2'],
-                                                                                                'NA',
-                                                                                                float(1),
-                                                                                                '.',
-                                                                                                '.',
-                                                                                                anchor1_summit,
-                                                                                                anchor2_summit,
-                                                                                                1,
-                                                                                                distance))
+                        true_loops[chrom].append((int(anchor1_summit), int(anchor2_summit)))
+                        outfile.write("{}\t{}\t{}\t{}\t{}\n\n".format(chrom,
+                                                                      anchor1_summit,
+                                                                      anchor2_summit,
+                                                                      1,
+                                                                      distance))
                 else:
                     if chrom not in less_sig_loops.keys():
                         less_sig_loops[chrom] = []
@@ -148,7 +139,6 @@ def main(argv):
         sys.exit(1)
 
 
-    chia = pd.read_table(opt.chiapet)
     chroms = GenomeData.hg19_chroms
     outfile = open(opt.training,'w')
 
@@ -165,60 +155,19 @@ def main(argv):
     # Load Hi-C loops: used to ensure that the randomly generated negative loops are not true loops identified in HiC.
     hic_loops = read_hic(opt.hic, bs_pool)
 
+    NumPos, true_loops, less_sig_loops = find_positive_interactions(opt.chiapet, hic_loops, bs_pool, chroms, outfile, opt)
+    Ratio = 5 # Ratio = 5 means 5 negative interaction will be generated for each positive interaction.
+    NumNeg = len(loop_length)*Ratio # NumNeg is the totoal number of negative interactions.          
+
     # Print the header
     outfile.write('{}\t{}\t{}\t{}\n'.format('chrom',
                                             'peak1',
                                             'peak2',
                                             'response',
                                             'length'))
-
-    loop_length = []
-
-    for index, row in chia.iterrows():
-        IAB = row['IAB']
-        FDR = row['FDR']
-        if (row['chrom1'] == row['chrom2'] and row['chrom1'] in chroms and row['chrom1'] != 'chrY'):
-            chrom = row['chrom1']
-            anchor1 = HTSeq.GenomicInterval(chrom, row['start1'], row['end1'],'.')
-            anchor2 = HTSeq.GenomicInterval(chrom, row['start2'], row['end2'],'.')
-            # Get the summit position of the anchors
-            if chrom in bs_pool.keys():
-                anchor1_summit = find_summits_in_anchors(anchor1, bs_pool[chrom])
-                anchor2_summit = find_summits_in_anchors(anchor2, bs_pool[chrom])
-            else:
-                anchor1_summit = 'NaN'
-                anchor2_summit = 'NaN'
-
-        # distance is the genomic length between the two motifs. To focus on long-range interactions,
-        # we required that distance >= 10kb and <= 1m
-            if (anchor1_summit != 'NaN' and anchor2_summit != 'NaN'):
-                if (int(anchor1_summit) > int(anchor2_summit)):
-                    temp = anchor1_summit
-                    anchor1_summit = anchor2_summit
-                    anchor2_summit = temp
-                distance = int(anchor2_summit) - int(anchor1_summit)
-
-                if (distance >= minLength and distance <= maxLength):
-                    if (IAB >= 2 and FDR <= 0.05):
-                        loop_length.append(distance)
-                        if chrom not in true_loops.keys():
-                            true_loops[chrom] = []
-
-                        true_loops[chrom].append((int(anchor1_summit), int(anchor2_summit)))
-                        outline = chrom+'\t'+anchor1_summit+'\t'+anchor2_summit+'\t'+str(1)+'\t'+str(distance)+'\n'
-                        outfile.write(outline)
-                    else:
-                        if chrom not in less_sig_loops.keys():
-                            less_sig_loops[chrom] = []
-                        less_sig_loops[chrom].append((int(anchor1_summit), int(anchor2_summit)))
-
-    Ratio = 5 # Ratio = 5 means 5 negative interaction will be generated for each positive interaction.
-    NumNeg = len(loop_length)*Ratio # NumNeg is the totoal number of negative interactions.
-
-
+    
     negative_interactions = []
     selected_neg = []
-
     # Generate the negative interactions pool
     total = 0
     for chrom in true_loops.keys():
