@@ -149,7 +149,6 @@ def main(argv):
 
 
     chia = pd.read_table(opt.chiapet)
-    hic = pd.read_table(opt.hic)
     chroms = GenomeData.hg19_chroms
     outfile = open(opt.training,'w')
 
@@ -160,19 +159,11 @@ def main(argv):
     true_loops = {} #true_interaction = {'chrXX':[(summit1,summit2),(summit1,summit2)...]}
     less_sig_loops = {} # To ensure a negative loops is not a less significant true loop.less_sig_loops = {'chrXX':[(summit1,summit2),(summit1,summit2)...]}
 
+    # Build the binding stie pool: bs_pool = {'chrom':[summit1, summit2,...]} 
     bs_pool = prepare_bs_pool(opt.peak, chroms)
 
-    # get the hic loops. HiC loops are used as a supplementary file to ensure that the randomly generated negative loops are not true loops identified in HiC.
-    hic_loops = {}
-    for index, row in hic.iterrows():
-        chrom = row['chrom']
-        anchor1 = HTSeq.GenomicInterval(chrom, row['start1']-1000, row['start1']+1000, '.')
-        anchor2 = HTSeq.GenomicInterval(chrom, row['start2']-1000, row['start2']+1000,'.')
-        if chrom not in hic_loops.keys():
-            hic_loops[chrom] = []
-        anchor1_summit = find_summits_in_anchors(anchor1, bs_pool[chrom])
-        anchor2_summit = find_summits_in_anchors(anchor2, bs_pool[chrom])
-        hic_loops[chrom].append((anchor1_summit,anchor2_summit))
+    # Load Hi-C loops: used to ensure that the randomly generated negative loops are not true loops identified in HiC.
+    hic_loops = read_hic(opt.hic, bs_pool)
 
     # Print the header
     outfile.write('{}\t{}\t{}\t{}\n'.format('chrom',
