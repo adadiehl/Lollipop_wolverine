@@ -112,11 +112,11 @@ def find_positive_interactions(chiapet, hic_loops, bs_pool, chroms, outfile, opt
                             true_loops[chrom] = []
                     
                         true_loops[chrom].append((int(anchor1_summit), int(anchor2_summit)))
-                        outfile.write("{}\t{}\t{}\t{}\t{}\n\n".format(chrom,
-                                                                      anchor1_summit,
-                                                                      anchor2_summit,
-                                                                      1,
-                                                                      distance))
+                        outfile.write("{}\t{}\t{}\t{}\t{}\n".format(chrom,
+                                                                    anchor1_summit,
+                                                                    anchor2_summit,
+                                                                    1,
+                                                                    distance))
                     else:
                         if chrom not in less_sig_loops.keys():
                             less_sig_loops[chrom] = []
@@ -195,6 +195,12 @@ def main(argv):
     hic_loops = read_hic(opt.hic, bs_pool)
 
     sys.stderr.write("Preparing positive interactions...\n")
+    # Print the header
+    outfile.write('{}\t{}\t{}\t{}\t{}\n'.format('chrom',
+                                                'peak1',
+                                                'peak2',
+                                                'response',
+                                                'length'))
     NumPos, true_loops, less_sig_loops = find_positive_interactions(opt.chiapet, hic_loops, bs_pool, chroms, outfile, opt)
     Ratio = opt.ratio # Ratio = 5 means 5 negative interaction will be generated for each positive interaction.
     NumNeg = NumPos*Ratio # NumNeg is the totoal number of negative interactions.          
@@ -214,12 +220,6 @@ def main(argv):
     selected_neg = np.random.choice(negative_interactions, NumNeg, replace=False)
     
     sys.stderr.write("Writing results...\n")
-    # Print the header
-    outfile.write('{}\t{}\t{}\t{}\n'.format('chrom',
-                                            'peak1',
-                                            'peak2',
-                                            'response',
-                                            'length'))
     for iv in selected_neg:
         length = iv.end - iv.start
         outline = iv.chrom+'\t'+str(iv.start)+'\t'+str(iv.end)+'\t'+str(0)+'\t'+str(length)+'\n'
