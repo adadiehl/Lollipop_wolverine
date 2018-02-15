@@ -119,7 +119,7 @@ def main(argv):
                                                             probas[i,1],
                                                             y[i]))
                 bedope.write("{}\t{}\t{}\t{}\t{}\t{}\tNA\t{}\t.\t.\t1\n".format(chrom,
-                                                                                int(data.iloc[i,1]-opt.extesion),
+                                                                                int(data.iloc[i,1]-opt.extension),
                                                                                 int(data.iloc[i,1]+opt.extension),
                                                                                 chrom,
                                                                                 int(data.iloc[i,4]-opt.extension),
