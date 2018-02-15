@@ -45,8 +45,7 @@ def prepare_bs_pool(peak_f, chroms):
     bs_pool = {}
     for chrom in peak.chrom.unique():
         if chrom in chroms and chrom != 'chrY':
-            bs_pool[chrom] = peak[peak['chrom'] == chrom].peak + peak[peak['chrom'] == chrom].chromStart
-            bs_pool[chrom] = bs_pool[chrom].sort_values(ascending=1)
+            bs_pool[chrom] = sorted(list(peak[peak['chrom'] == chrom].peak + peak[peak['chrom'] == chrom].chromStart))
     return bs_pool
 
 
@@ -118,15 +117,15 @@ def find_positive_interactions(chiapet, hic_loops, bs_pool, chroms, outfile, opt
                                                                       anchor2_summit,
                                                                       1,
                                                                       distance))
-                else:
-                    if chrom not in less_sig_loops.keys():
-                        less_sig_loops[chrom] = []
-                        less_sig_loops[chrom].append((int(anchor1_summit), int(anchor2_summit)))
+                    else:
+                        if chrom not in less_sig_loops.keys():
+                            less_sig_loops[chrom] = []
+                            less_sig_loops[chrom].append((int(anchor1_summit), int(anchor2_summit)))
                         
     return NumPos, true_loops, less_sig_loops
                     
 
-def prepare_negative_interactions(true_loops, hic_loops, bs_pool, minLength, maxLength, opt):
+def prepare_negative_interactions(true_loops, less_sig_loops, hic_loops, bs_pool, minLength, maxLength, opt):
     """
     Prepare negative training interactions based on the binding site pool,
     positive interaction, and hi-c loops.
@@ -137,18 +136,30 @@ def prepare_negative_interactions(true_loops, hic_loops, bs_pool, minLength, max
         for i_left in xrange(len(bs_pool[chrom])-1):
             m_left = bs_pool[chrom][i_left]
             for i_right in xrange(i_left+1, len(bs_pool[chrom])):
+                good = False
                 m_right = bs_pool[chrom][i_right]
                 length = m_right - m_left
                 if length >= minLength and length <= maxLength and (m_left, m_right) not in true_loops[chrom]:
                     if chrom in less_sig_loops.keys():
                         if (m_left, m_right) not in less_sig_loops[chrom]:
-                            iv = HTSeq.GenomicInterval(chrom, m_left, m_right, '.')
-                            negative_interactions.append(iv)
-                            total += 1
+                            if opt.use_hic:
+                                if df.iloc[j].chrom1 in hic_loops.keys():
+                                    if (df.iloc[j].peak1, df.iloc[j].peak2) not in hic_loops[chrom]:
+                                        good = True
+                            else:
+                                good = True                                
                     else:
-                        iv = HTSeq.GenomicInterval(chrom, m_left, m_right, '.')
-                        negative_interactions.append(iv)
-                        total += 1
+                        if opt.use_hic:
+                            if df.iloc[j].chrom1 in hic_loops.keys():
+                                if (df.iloc[j].peak1, df.iloc[j].peak2) not in hic_loops[chrom]:
+                                    good = True
+                        else:
+                            good = True
+                if good:
+                    iv = HTSeq.GenomicInterval(chrom, m_left, m_right, '.')
+                    negative_interactions.append(iv)
+                    total += 1
+                    
     return negative_interactions, total
 
 
@@ -164,6 +175,8 @@ def main(argv):
                       help="Maximum loop size.")
     parser.add_option('-r', '--ratio', type=int, default=5,
                       help="Ratio of negative to positive interactions. Default 5.")
+    parser.add_option('-z', '--use_hic', action='store_true', default=False,
+                      help="Use Hi-C data as a supplement to ChIA-pet loops in finding negative loops.")
     
     (opt, args) = parser.parse_args(argv)
     if len(argv) < 8:
@@ -174,32 +187,39 @@ def main(argv):
     chroms = GenomeData.hg19_chroms
     outfile = open(opt.training,'w')
 
-    true_loops = {} #true_interaction = {'chrXX':[(summit1,summit2),(summit1,summit2)...]}
-    less_sig_loops = {} # To ensure a negative loops is not a less significant true loop.less_sig_loops = {'chrXX':[(summit1,summit2),(summit1,summit2)...]}
-
+    sys.stderr.write("Reading in positive datasets...\n")
     # Build the binding stie pool: bs_pool = {'chrom':[summit1, summit2,...]} 
     bs_pool = prepare_bs_pool(opt.peak, chroms)
 
     # Load Hi-C loops: used to ensure that the randomly generated negative loops are not true loops identified in HiC.
     hic_loops = read_hic(opt.hic, bs_pool)
 
+    sys.stderr.write("Preparing positive interactions...\n")
     NumPos, true_loops, less_sig_loops = find_positive_interactions(opt.chiapet, hic_loops, bs_pool, chroms, outfile, opt)
     Ratio = opt.ratio # Ratio = 5 means 5 negative interaction will be generated for each positive interaction.
-    NumNeg = len(loop_length)*Ratio # NumNeg is the totoal number of negative interactions.          
+    NumNeg = NumPos*Ratio # NumNeg is the totoal number of negative interactions.          
 
+    sys.stderr.write("Finding negative interactions...\n")
+    negative_interactions, total = prepare_negative_interactions(true_loops, less_sig_loops, hic_loops, bs_pool,
+                                                                 opt.min_loop_size, opt.max_loop_size,
+                                                                 opt)
+    sys.stderr.write('Found {} negative loops in total\n'.format(total))
+
+    if NumNeg >= len(negative_interactions):
+        sys.stderr.write("The total number of negative interactions is less than {} times the number of positive loops. Using all interactions.\n".format(opt.ratio))
+        NumNeg = len(negative_interactions)
+    else:                
+        sys.stderr.write("Randomly selecting {} negative loops...".format(NumNeg))
+
+    selected_neg = np.random.choice(negative_interactions, NumNeg, replace=False)
+    
+    sys.stderr.write("Writing results...\n")
     # Print the header
     outfile.write('{}\t{}\t{}\t{}\n'.format('chrom',
                                             'peak1',
                                             'peak2',
                                             'response',
                                             'length'))
-    
-    negative_interactions, total = prepare_negative_interactions(true_loops, hic_loops, bs_pool,
-                                                                 opt.min_loop_size, opt.max_loop_size,
-                                                                 opt)
-    print 'There are '+str(total)+' negative loops in total'
-
-    selected_neg = np.random.choice(negative_interactions, NumNeg, replace=False)
     for iv in selected_neg:
         length = iv.end - iv.start
         outline = iv.chrom+'\t'+str(iv.start)+'\t'+str(iv.end)+'\t'+str(0)+'\t'+str(length)+'\n'
