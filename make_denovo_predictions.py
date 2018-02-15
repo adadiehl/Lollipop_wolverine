@@ -73,7 +73,7 @@ def main(argv):
 
     chroms = summits.keys()
 
-    print 'Preparing reads information...'
+    sys.stderr.write('Preparing reads information...\n')
     read_info, read_numbers = lib.prepare_reads_info(signal_table)
 
     distance_distal = 1e+6
@@ -87,7 +87,7 @@ def main(argv):
     cvg = HTSeq.GenomicArray('auto', stranded=False, typecode='i')
 
     for chrom in summits.keys():
-        print "Preparing data for "+chrom+'...'
+        sys.stderr.write("Preparing data for {}...\n".format(chrom))
         summits[chrom] = sorted(summits[chrom])
         data = pd.DataFrame(columns=['chrom','peak1','peak2','length'])
         for i in xrange(len(summits[chrom])-1):
@@ -107,10 +107,25 @@ def main(argv):
         probas = loop_clf.predict_proba(X[:,:]) # probas is an array of shape [n_samples, n_classes]
         for i in xrange(len(y)):
             if (y[i] != 0):
+                """
                 outline = chrom+'\t'+str(int(data.iloc[i,1]))+'\t'+str(int(data.iloc[i,2]))+'\t'+str(probas[i,1])+'\t'+str(y[i])+'\n'
                 outfile.write(outline)
                 outline1 = chrom+'\t'+str(int(data.iloc[i,1]))+'\t'+str(int(data.iloc[i,1])+motif_length)+'\t'+chrom+'\t'+str(int(data.iloc[i,2]))+'\t'+str(int(data.iloc[i,2])+motif_length)+'\t'+'NA'+'\t'+                str(probas[i,1])+'\t'+'.'+'\t'+'.'+'\t'+str(1)+'\n'
                 bedope.write(outline1)
+                """
+                outfile.write("{}\t{}\t{}\t{}\t{}\n".format(chrom,
+                                                            int(data.iloc[i].peak1),
+                                                            int(data.iloc[i].peak2),
+                                                            probas[i,1],
+                                                            y[i]))
+                bedope.write("{}\t{}\t{}\t{}\t{}\t{}\tNA\t{}\t.\t.\t1\n".format(chrom,
+                                                                                int(data.iloc[i,1]-opt.extesion),
+                                                                                int(data.iloc[i,1]+opt.extension),
+                                                                                chrom,
+                                                                                int(data.iloc[i,4]-opt.extension),
+                                                                                int(data.iloc[i,5]+opt.extension),
+                                                                                probas[i,1]))
+                                
                 iv = HTSeq.GenomicInterval(chrom, int(data.iloc[i,1]), int(data.iloc[i,2]), '.')
                 cvg[iv] += 1
 
