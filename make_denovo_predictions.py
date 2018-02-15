@@ -122,8 +122,8 @@ def main(argv):
                                                                                 int(data.iloc[i,1]-opt.extension),
                                                                                 int(data.iloc[i,1]+opt.extension),
                                                                                 chrom,
-                                                                                int(data.iloc[i,4]-opt.extension),
-                                                                                int(data.iloc[i,5]+opt.extension),
+                                                                                int(data.iloc[i,2]-opt.extension),
+                                                                                int(data.iloc[i,2]+opt.extension),
                                                                                 probas[i,1]))
                                 
                 iv = HTSeq.GenomicInterval(chrom, int(data.iloc[i,1]), int(data.iloc[i,2]), '.')
