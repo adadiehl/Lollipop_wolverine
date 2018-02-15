@@ -3,7 +3,7 @@
 
 # Author: Yan Kai
 # This script is to prepare features for the generated loops for training purpose.
-# Two inputs: 1. The generated positive and negative loops in the format: chrom+start1+start2+length+response
+# Two inputs: 1. The generated positive and negative loops in the format: chrom+peak1+peak2+length+response
 #             2. The infomation table that contains the complete path for necessary raw BED file and peak file.
 # Output is: The training data, i.e the interactions plus all the listed features.
 
@@ -23,6 +23,8 @@ import bisect
 import tabix as tb # Added by AGD
 import multiprocessing
 import ctypes
+
+from lib import prepare_anchors
 
 """
 Globals (Needed for multiprocessing)
@@ -55,21 +57,6 @@ def _init_motifs(s1, s2, p):
     scores2 = s2
     pattern = p
     
-def prepare_anchors(row, ext):
-    """
-    Added by AGD, 1/26/2018
-    Prepare a set of anchors from a pair of anchor summits.
-    Inputs:
-        row = a row from the training data table
-        ext = the number of bp to extend the peak up and downstream.
-    """
-    chrom = row['chrom']
-    start1 = row['start1']
-    anchor1 = HTSeq.GenomicInterval(chrom, start1-ext, start1+ext, '.')
-    start2 = row['start2']
-    anchor2 = HTSeq.GenomicInterval(chrom, start2-ext, start2+ext, '.')
-    return anchor1, anchor2
-
 
 def assign_motif_pattern(strand1, strand2):
     if (strand1 == '-' and strand2 == '+'):
@@ -265,8 +252,8 @@ def add_anchor_conservation(train, chroms, Peak):
         AvgCons = []
         DevCons = []
         for index, row in chrom_train.iterrows():
-            con1 = sum(cvg[(row['start1']-ext): (row['start1']+ext)])
-            con2 = sum(cvg[(row['start2']-ext): (row['start2']+ext)])
+            con1 = sum(cvg[(row['peak1']-ext): (row['peak1']+ext)])
+            con2 = sum(cvg[(row['peak2']-ext): (row['peak2']+ext)])
             AvgCons.append((con1+con2)/2.0)
             DevCons.append(np.std([con1, con2]))
         chrom_train['avg_conservation'] = pd.Series(AvgCons)
@@ -287,7 +274,7 @@ def add_local_feature(signal, train, BED):
     fragment = 150 # This is the size of the ChIP fragment, usually it is 150.
     shift = fragment/2
     BED_reader = open(BED,'r')
-    read_info = {}  # read_info = {'chrom':[start1, start2,...]}  actually 'start' here is the mid-point of a fragment
+    read_info = {}  # read_info = {'chrom':[peak1, peak2,...]}  actually 'start' here is the mid-point of a fragment
 
     read_number = 0
     for line in BED_reader:
@@ -317,11 +304,11 @@ def add_local_feature(signal, train, BED):
     RPKMs2 = []
     for index, row in train.iterrows():
         chrom = row['chrom']
-        start1 = row['start1']
-        start2 = row['start2']
+        peak1 = row['peak1']
+        peak2 = row['peak2']
 
-        count1 = bisect.bisect_right(read_info[chrom], start1+extension) - bisect.bisect_left(read_info[chrom], start1-extension)
-        count2 = bisect.bisect_right(read_info[chrom], start2+extension) - bisect.bisect_left(read_info[chrom], start2-extension)
+        count1 = bisect.bisect_right(read_info[chrom], peak1+extension) - bisect.bisect_left(read_info[chrom], peak1-extension)
+        count2 = bisect.bisect_right(read_info[chrom], peak2+extension) - bisect.bisect_left(read_info[chrom], peak2-extension)
 
         RPKM1 = float(count1)/(float(read_number)*2*extension)*1000000000
         RPKM2 = float(count2)/(float(read_number)*2*extension)*1000000000
@@ -474,9 +461,9 @@ def add_gene_expression(train, Peak):
     loop_expressions = []
     for index, row in train.iterrows():
         chrom = row['chrom']
-        start1 = row['start1']
-        start2 = row['start2']
-        iv = HTSeq.GenomicInterval(chrom, start1, start2)
+        peak1 = row['peak1']
+        peak2 = row['peak2']
+        iv = HTSeq.GenomicInterval(chrom, peak1, peak2)
         loop_expression = 0
         for gene in gene_exp[chrom].keys():
             if gene.overlaps(iv):
@@ -495,7 +482,7 @@ def add_regional_feature_by_reads(signal, train, anchors, BED):
     print "\t\tPreparing the in-between and loop-flanking features of "+str(signal)+'...'
     BED = open(BED, 'r')
     shift = 75
-    signal_dic = {}  # signal_dic = {"chrXX":[start1, start2, ...]} 'start' here are mid-point of one fragment
+    signal_dic = {}  # signal_dic = {"chrXX":[peak1, peak2, ...]} 'start' here are mid-point of one fragment
     read_number = 0
     for line in BED:
         read_number += 1
@@ -524,30 +511,30 @@ def add_regional_feature_by_reads(signal, train, anchors, BED):
     downstream = []
     for index, row in train.iterrows():
         chrom = row['chrom']
-        start1 = row['start1']
-        start2 = row['start2']
+        peak1 = row['peak1']
+        peak2 = row['peak2']
 
-        index1 = anchors[chrom].index(start1)
-        index2 = anchors[chrom].index(start2)
+        index1 = anchors[chrom].index(peak1)
+        index2 = anchors[chrom].index(peak2)
         if index1 != 0:
             up_motif = anchors[chrom][index1 - 1]
-            up_count = bisect.bisect_right(signal_dic[chrom], start1) - bisect.bisect_left(signal_dic[chrom], up_motif)
-            up_strength = float(up_count)/float(abs(up_motif-start1)*read_number)*1e+9
+            up_count = bisect.bisect_right(signal_dic[chrom], peak1) - bisect.bisect_left(signal_dic[chrom], up_motif)
+            up_strength = float(up_count)/float(abs(up_motif-peak1)*read_number)*1e+9
         else:
             up_strength = 0
         upstream.append(up_strength)
         if index2 != (len(anchors[chrom])-1):
             down_motif = anchors[chrom][index2 + 1]
-            down_count = bisect.bisect_right(signal_dic[chrom], down_motif) - bisect.bisect_left(signal_dic[chrom], start2)
-            down_strength = float(down_count)/float(abs(down_motif-start2)*read_number)*1e+9
+            down_count = bisect.bisect_right(signal_dic[chrom], down_motif) - bisect.bisect_left(signal_dic[chrom], peak2)
+            down_strength = float(down_count)/float(abs(down_motif-peak2)*read_number)*1e+9
         else:
             down_strength = 0
         downstream.append(down_strength)
 
         strength = 0
-        count = bisect.bisect_right(signal_dic[chrom], start2) - bisect.bisect_left(signal_dic[chrom], start1)
+        count = bisect.bisect_right(signal_dic[chrom], peak2) - bisect.bisect_left(signal_dic[chrom], peak1)
 
-        strength = float(count)/float(abs(start2-start1)*read_number)*1e+9
+        strength = float(count)/float(abs(peak2-peak1)*read_number)*1e+9
         in_between.append(strength)
 
     in_between_signal = signal+'_in-between'
@@ -588,7 +575,7 @@ def main(argv):
 	chroms = GenomeData.hg19_chroms
 	#chroms = ['chr1']
 	train = pd.read_table(opt.training)
-	train = train.sort_values(by=['chrom','start1','start2'], axis = 0, ascending=[1,1,1])
+	train = train.sort_values(by=['chrom','peak1','peak2'], axis = 0, ascending=[1,1,1])
 	info_table = pd.read_table(opt.info_table)
 	anchors = {} # anchors = {'chr':set(summit1, summit2,)}
 	
@@ -598,8 +585,8 @@ def main(argv):
 	        chrom = row['chrom']
 	        if chrom not in anchors.keys():
 	            anchors[chrom] = set()
-	        anchors[chrom].add(row['start1'])
-	        anchors[chrom].add(row['start2'])
+	        anchors[chrom].add(row['peak1'])
+	        anchors[chrom].add(row['peak2'])
         sys.stderr.write("Sorting the anchors...\n")
 	for chrom in anchors.keys():
 		anchors[chrom] = list(anchors[chrom])
