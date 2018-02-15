@@ -143,15 +143,15 @@ def prepare_negative_interactions(true_loops, less_sig_loops, hic_loops, bs_pool
                     if chrom in less_sig_loops.keys():
                         if (m_left, m_right) not in less_sig_loops[chrom]:
                             if opt.use_hic:
-                                if df.iloc[j].chrom1 in hic_loops.keys():
-                                    if (df.iloc[j].peak1, df.iloc[j].peak2) not in hic_loops[chrom]:
+                                if chrom in hic_loops.keys():
+                                    if (m_left, m_right) not in hic_loops[chrom]:
                                         good = True
                             else:
                                 good = True                                
                     else:
                         if opt.use_hic:
-                            if df.iloc[j].chrom1 in hic_loops.keys():
-                                if (df.iloc[j].peak1, df.iloc[j].peak2) not in hic_loops[chrom]:
+                            if chrom in hic_loops.keys():
+                                if (m_left, m_right) not in hic_loops[chrom]:
                                     good = True
                         else:
                             good = True
