@@ -13,6 +13,19 @@ from sklearn.externals import joblib
 import HTSeq
 import lib
 
+def load_signals_table(info_table):
+    """
+    Read the signals table from disk.
+    TO-DO: Is this really needed??
+    """
+    signal_table = pd.read_table(info_table)
+    signals = []
+    for index, row in signal_table.iterrows():
+        if (row['Signal'] != 'Motif' and row['Signal'] != 'Gene expression' and row['Signal'] != 'PhastCon'):
+            signal = row['Signal']
+            signals.append(signal)
+    return signal_table, signals
+
 
 def main(argv):
     parser = OptionParser()
@@ -42,77 +55,60 @@ def main(argv):
         parser.print_help()
         sys.exit(1)
 
-    signal_table = pd.read_table(opt.info_table)
-
     loop_clf = joblib.load(opt.clf)
     outfilename = opt.outdir+'/Lollipop_loops.txt'
     bedope_name = opt.outdir+'/Lollipop_loops.bedpe'
     loop_cvg = opt.outdir+'/Lollipop_loops_cvg.bedgraph'
-    motif_length = 18
 
+    # Read in the signals table
+    signal_table, signals = load_signals_table(opt.info_table)
 
-    signals = []
-    for index, row in signal_table.iterrows():
-        if (row['Signal'] != 'Motif' and row['Signal'] != 'Gene expression' and row['Signal'] != 'PhastCon'):
-            signal = row['Signal']
-            signals.append(signal)
-
-
-    CTCF_ChIP = pd.read_table(opt.bs , header=None)
+    # Load CTCF Summits
+    sys.stderr.write("Preparing CTCF summits list...\n")
+    CTCF_ChIP = lib.read_narrowPeak(opt.bs)
     summits = {}
     for index, row in CTCF_ChIP.iterrows():
-        chrom = row[0]
-        start = row[1]
-        end = row[2]
-        summit = (start + end)/2
+        # Assumes narrowPeak format!
+        chrom = row['chrom']
+        summit = row['chromStart'] + row['peak']
         if chrom not in summits.keys():
             summits[chrom] = set()
         summits[chrom].add(summit)
     for chrom in summits.keys():
-        summits[chrom] = list(summits[chrom])
-
-    chroms = summits.keys()
+        summits[chrom] = sorted(list(summits[chrom]))
+    chroms = CTCF_ChIP.chrom.unique()
 
     sys.stderr.write('Preparing reads information...\n')
     read_info, read_numbers = lib.prepare_reads_info(signal_table)
 
-    distance_distal = 1e+6
-    distance_proximal = 10000  # We focus on long-range interactions between [10kb,1mb]
-
-
-    raw_features = (signals, read_info, read_numbers)
-    i = 0
+    # Open output streams
     outfile = open(outfilename, 'w')
     bedope = open(bedope_name, 'w')
     cvg = HTSeq.GenomicArray('auto', stranded=False, typecode='i')
 
-    for chrom in summits.keys():
+    for chrom in summits.keys():        
         sys.stderr.write("Preparing data for {}...\n".format(chrom))
-        summits[chrom] = sorted(summits[chrom])
-        data = pd.DataFrame(columns=['chrom','peak1','peak2','length'])
-        for i in xrange(len(summits[chrom])-1):
-            data = lib.prepare_interactions(data, chrom, i, summits[chrom], distance_distal, distance_proximal)
-        """
-        print "Preparing motif orientation pattern and strength..."
-        data = lib.add_motif_pattern(data, signal_table.iloc[0,2])
-        print 'Preparing sequence conservation feature...'
-        data = lib.add_anchor_conservation(data, chrom, signal_table.iloc[1,2])
 
-        data = lib.prepare_features_for_interactions(data, summits, signal_table, raw_features)
-        """
+        # Prepare a table of putative interactions within the upper and lower bounds for loop length
+        sys.stderr.write("\tPreparing putative interactions...\n")
+        data = lib.prepare_interactions(chrom,
+                                        CTCF_ChIP[CTCF_ChIP.chrom == chrom],
+                                        opt.ctcf_f, opt.proximal, opt.distal, opt)
         data = lib.prepare_features_for_interactions(data, summits, signal_table, read_info, read_numbers, opt)
-        
+
+        # Strip genomic coordinates and convert annotations to np.matrix form
         X = data.iloc[:,3:].as_matrix()
+
+        sys.stderr.write("\tPredicting loops with the random forest classifier...\n")
+        # Predict classes (loop or background) with the trained random forest classifier
         y = loop_clf.predict(X[:,:])
+        # Calculate class probabilities with the trained random forest classifier 
         probas = loop_clf.predict_proba(X[:,:]) # probas is an array of shape [n_samples, n_classes]
+
+        # Print results
+        sys.stderr.write("\tWriting results...\n")
         for i in xrange(len(y)):
             if (y[i] != 0):
-                """
-                outline = chrom+'\t'+str(int(data.iloc[i,1]))+'\t'+str(int(data.iloc[i,2]))+'\t'+str(probas[i,1])+'\t'+str(y[i])+'\n'
-                outfile.write(outline)
-                outline1 = chrom+'\t'+str(int(data.iloc[i,1]))+'\t'+str(int(data.iloc[i,1])+motif_length)+'\t'+chrom+'\t'+str(int(data.iloc[i,2]))+'\t'+str(int(data.iloc[i,2])+motif_length)+'\t'+'NA'+'\t'+                str(probas[i,1])+'\t'+'.'+'\t'+'.'+'\t'+str(1)+'\n'
-                bedope.write(outline1)
-                """
                 outfile.write("{}\t{}\t{}\t{}\t{}\n".format(chrom,
                                                             int(data.iloc[i].peak1),
                                                             int(data.iloc[i].peak2),
@@ -128,7 +124,6 @@ def main(argv):
                                 
                 iv = HTSeq.GenomicInterval(chrom, int(data.iloc[i,1]), int(data.iloc[i,2]), '.')
                 cvg[iv] += 1
-
 
     cvg.write_bedgraph_file(loop_cvg)
     outfile.close()

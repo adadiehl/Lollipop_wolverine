@@ -412,14 +412,66 @@ def get_bigWig_scores(map_args, def_param=(scores1,scores2)):
     lock.release()
     
     
+def prepare_interactions(chrom, anchors, BED, proximal, distal, opt):
+    """
+    This function is to prepare the potential interactions for all peaks on one chromosome          
+    with all the downnstream peaks on the same chromosome. Assumes that anchors is a pandas         
+    dataframe read in by read_narrowPeak, and BED is the Tabix-indexed narrowPeak file              
+    containing the same peaks stored in the anchors table. Returns a pandas dataFrame               
+    following bedpe column conventions.                                                             
+    """
+    data = pd.DataFrame(columns=['chrom',
+                                 'peak1',
+                                 'peak2',
+                                 'length'])
+    for idx, anchor in anchors.iterrows():
+        peaks = tb.open(BED)
+        feats = get_features(anchor.chrom,
+                             anchor.chromStart + anchor.peak + proximal,
+                             anchor.chromStart + anchor.peak + distal,
+                             peaks,
+                             ["chrom",
+                              "chromStart",
+                              "chromEnd",
+                              "name",
+                              "score",
+                              "strand",
+                              "signalValue",
+                              "pValue",
+                              "qValue",
+                              "peak"],
+                             ["string",
+                              "int64",
+                              "int64",
+                              "string",
+                              "int64",
+                              "string",
+                              "float64",
+                              "float64",
+                              "float64",
+                              "int64"])
+        
+        data1 = pd.DataFrame(columns=['chrom',
+                                      'peak1',
+                                      'peak2',
+                                      'length'])
+        data1['peak2'] = feats.chromStart + feats.peak
+        data1['peak1'] = anchor.chromStart + anchor.peak
+        data1['chrom'] =  chrom
+        data1['length'] = data1['peak2'] - data1['peak1']
+        
+        data = pd.concat([data,data1],ignore_index=True)
+
+    return data
+
     
 """
 End Added by AGD
 
 """
 
-def prepare_interactions(data, chrom, i, start_list, distance_distal, distance_proximal):
-    """
+#def prepare_interactions(data, chrom, i, start_list, distance_distal, distance_proximal):
+"""
     This function is to prepare the potential interactions for one motif with all the downstream motifs within a certain
     range.
     i: the index of the particular summits in the motif list
@@ -430,7 +482,6 @@ def prepare_interactions(data, chrom, i, start_list, distance_distal, distance_p
     chrom+start1+start2+length
     All the chroms and start1 will be identifcal with each other in this data frame.
 
-    """
 
     data1 = pd.DataFrame()
     start1 = start_list[i]
@@ -456,7 +507,7 @@ def prepare_interactions(data, chrom, i, start_list, distance_distal, distance_p
 
     data = pd.concat([data,data1],ignore_index=True)
     return data
-
+"""
 
 
 def prepare_reads_info(signal_table):
