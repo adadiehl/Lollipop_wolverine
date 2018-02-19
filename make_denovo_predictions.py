@@ -97,7 +97,7 @@ def main(argv):
         data = lib.prepare_features_for_interactions(data, summits, signal_table, read_info, read_numbers, opt)
 
         # Strip genomic coordinates and convert annotations to np.matrix form
-        X = data.iloc[:,3:].as_matrix()
+        X = data.iloc[:,7:].as_matrix()
 
         sys.stderr.write("\tPredicting loops with the random forest classifier...\n")
         # Predict classes (loop or background) with the trained random forest classifier
@@ -114,6 +114,7 @@ def main(argv):
                                                             int(data.iloc[i].peak2),
                                                             probas[i,1],
                                                             y[i]))
+                """
                 bedope.write("{}\t{}\t{}\t{}\t{}\t{}\tNA\t{}\t.\t.\t1\n".format(chrom,
                                                                                 int(data.iloc[i,1]-opt.extension),
                                                                                 int(data.iloc[i,1]+opt.extension),
@@ -121,7 +122,14 @@ def main(argv):
                                                                                 int(data.iloc[i,2]-opt.extension),
                                                                                 int(data.iloc[i,2]+opt.extension),
                                                                                 probas[i,1]))
-                                
+                """
+                bedope.write("{}\t{}\t{}\t{}\t{}\t{}\tNA\t{}\t.\t.\t1\n".format(chrom,
+                                                                                int(data.iloc[i].start1),
+                                                                                int(data.iloc[i].end1),
+                                                                                chrom,
+                                                                                int(data.iloc[i].start2),
+                                                                                int(data.iloc[i].end2),
+                                                                                probas[i,1]))
                 iv = HTSeq.GenomicInterval(chrom, int(data.iloc[i,1]), int(data.iloc[i,2]), '.')
                 cvg[iv] += 1
 

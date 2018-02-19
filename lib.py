@@ -414,13 +414,17 @@ def get_bigWig_scores(map_args, def_param=(scores1,scores2)):
     
 def prepare_interactions(chrom, anchors, BED, proximal, distal, opt):
     """
-    This function is to prepare the potential interactions for all peaks on one chromosome          
-    with all the downnstream peaks on the same chromosome. Assumes that anchors is a pandas         
-    dataframe read in by read_narrowPeak, and BED is the Tabix-indexed narrowPeak file              
-    containing the same peaks stored in the anchors table. Returns a pandas dataFrame               
-    following bedpe column conventions.                                                             
+    This function is to prepare the potential interactions for all peaks on one chromosome
+    with all the downnstream peaks on the same chromosome. Assumes that anchors is a pandas
+    dataframe read in by read_narrowPeak, and BED is the Tabix-indexed narrowPeak file
+    containing the same peaks stored in the anchors table. Returns a pandas dataFrame
+    following bedpe column conventions.
     """
     data = pd.DataFrame(columns=['chrom',
+                                 'start1',
+                                 'end1',
+                                 'start2',
+                                 'end2',
                                  'peak1',
                                  'peak2',
                                  'length'])
@@ -452,63 +456,61 @@ def prepare_interactions(chrom, anchors, BED, proximal, distal, opt):
                               "int64"])
         
         data1 = pd.DataFrame(columns=['chrom',
+                                      'start1',
+                                      'end1',
+                                      'start2',
+                                      'end2',
                                       'peak1',
                                       'peak2',
                                       'length'])
+        data1['start2'] = feats.chromStart
+        data1['end2'] = feats.chromEnd
         data1['peak2'] = feats.chromStart + feats.peak
         data1['peak1'] = anchor.chromStart + anchor.peak
         data1['chrom'] =  chrom
+        data1['start1'] = anchor.chromStart
+        data1['end1'] = anchor.chromEnd
         data1['length'] = data1['peak2'] - data1['peak1']
         
         data = pd.concat([data,data1],ignore_index=True)
 
     return data
 
-    
+
+def prepare_features_for_interactions(data, summits, signal_table, read_info, read_numbers, opt):
+    """
+    data is a pandas dataframe with chrom+start1+start2+length.
+    """
+    for index, row in signal_table.iterrows():
+        signal = row['Signal']
+        Format = row['Format']
+        Path = row['Path']
+        if signal == 'Motif':  # AGD: Don't use parens around conditionals
+            sys.stderr.write("\tAdding motif annotations...\n")
+            data = add_motif_pattern(data, Path, opt)
+        
+        elif signal == 'PhastCon':
+            sys.stderr.write("\tAdding PhastCons conservation...\n")
+            data = add_bigWig_feature(data, Path, opt)
+        elif signal == 'Gene expression':
+            sys.stderr.write("\tAdding gene expression...\n")
+            data = add_gene_expression(data, Path, opt)
+        else:
+            sys.stderr.write("\tProcessing {} features...\n".format(signal))
+            if Format == 'bed':
+                #data = add_local_feature(signal, data, Path)
+                #data = add_regional_feature_by_reads(signal, data, anchors, Path)
+                data = add_features(data, summits, read_info, read_numbers, signal, opt)
+            elif Format == 'narrowPeak':
+                data = add_peak_feature(signal, data, Path, opt)
+                
+    return data
+            
+
 """
 End Added by AGD
 
 """
-
-#def prepare_interactions(data, chrom, i, start_list, distance_distal, distance_proximal):
-"""
-    This function is to prepare the potential interactions for one motif with all the downstream motifs within a certain
-    range.
-    i: the index of the particular summits in the motif list
-    start_list: the list of all the summits in one chrom,it's sorted
-    distance_distal/proximal: only the interactions whose lengh is in the range of [proximal, distal] will be kept.
-
-    Returned: a pandas data frame with 4 columns:
-    chrom+start1+start2+length
-    All the chroms and start1 will be identifcal with each other in this data frame.
-
-
-    data1 = pd.DataFrame()
-    start1 = start_list[i]
-    chromosome = []
-    left = []
-    right = []
-    length = []
-    for j in xrange(i+1,len(start_list)):
-        start2 = start_list[j]
-        interval = start2 - start1
-        if (interval >= distance_proximal and interval <=  distance_distal):
-            chromosome.append(chrom)
-            left.append(int(start1))
-            right.append(int(start2))
-            length.append(int(interval))
-        else:
-            break
-
-    data1['chrom'] = pd.Series(chromosome)
-    data1['peak1'] = pd.Series(left)
-    data1['peak2'] = pd.Series(right)
-    data1['length'] = pd.Series(length)
-
-    data = pd.concat([data,data1],ignore_index=True)
-    return data
-"""
-
 
 def prepare_reads_info(signal_table):
     """
@@ -703,34 +705,3 @@ def add_gene_expression(data, Peak):
         loop_expressions.append(loop_expression)
     data['expression'] = pd.Series(loop_expressions, index = data.index)
     return data
-
-def prepare_features_for_interactions(data, summits, signal_table, read_info, read_numbers, opt):
-    """
-    data is a pandas dataframe with chrom+start1+start2+length.
-    """
-    for index, row in signal_table.iterrows():
-        signal = row['Signal']
-        Format = row['Format']
-        Path = row['Path']
-        if signal == 'Motif':  # AGD: Don't use parens around conditionals
-            sys.stderr.write("\tAdding motif annotations...\n")
-            data = add_motif_pattern(data, Path, opt)
-        
-        elif signal == 'PhastCon':
-            sys.stderr.write("\tAdding PhastCons conservation...\n")
-            data = add_bigWig_feature(data, Path, opt)
-        elif signal == 'Gene expression':
-            sys.stderr.write("\tAdding gene expression...\n")
-            data = add_gene_expression(data, Path, opt)
-        else:
-            sys.stderr.write("\tProcessing {} features...\n".format(signal))
-            if Format == 'bed':
-                #data = add_local_feature(signal, data, Path)
-                #data = add_regional_feature_by_reads(signal, data, anchors, Path)
-                data = add_features(data, summits, read_info, read_numbers, signal, opt)
-            elif Format == 'narrowPeak':
-                data = add_peak_feature(signal, data, Path, opt)
-
-    return data
-
-
