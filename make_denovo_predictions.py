@@ -27,6 +27,26 @@ def load_signals_table(info_table):
     return signal_table, signals
 
 
+def prepare_summits(bs, opt):
+    """                                                                                           
+    Prepare summits list for de-novo predictions.                                                 
+    """
+    CTCF_ChIP = lib.read_narrowPeak(bs)
+    summits = {}
+    for index, row in CTCF_ChIP.iterrows():
+        # Assumes narrowPeak format!
+        chrom = row['chrom']
+        summit = row['chromStart'] + row['peak']
+        if chrom not in summits.keys():
+            summits[chrom] = set()
+            summits[chrom].add(summit)
+    for chrom in summits.keys():
+        summits[chrom] = sorted(list(summits[chrom]))
+    chroms = summits.keys()
+    return summits, chroms, CTCF_ChIP
+                                                                                            
+
+
 def main(argv):
     parser = OptionParser()
     parser.add_option("-b", "--bs", action="store", type="string", dest="bs", metavar="<file>", help="the CTCF ChIP-Seq peak file")
@@ -40,14 +60,16 @@ def main(argv):
     parser.add_option('-d', '--distal', type=int, default=1e+6,
                       help='Maximum distance between upstream and downstream loop anchors. Default 1e+6.')
     parser.add_option('-e', '--extension', type=int, default=2000,
-                      help='Size of the extesion window to append up and downstream of each anchor peak for signal calculation. Default 2000 (as in original).')
+                      help='Size of the extesion window to append up and downstream of each anchor peak for signal calculation. Default 2000 (as in original). Set to 0 to use actual element boundaries.')
     parser.add_option('-m', '--motif_extension', type=int, default=500,
-                      help='Size of extension window to append when finding motif features. Default 500.')
+                      help='Size of extension window to append when finding motif features. Default 500. Set to 0 to use actual element boundaries.')
     parser.add_option('-z', '--cons_extension', type=int, default=20,
                       help='Size of extension window to append when calculating conservation. Default 20.')
     parser.add_option('-a', '--collapse_peaks', type='choice', choices=["max", "avg", "min", "sum"], default='max',
                       help='How to handle multiple overlapping peak features. Allowed values: max (use maximum score), avg (average all scores), min (use lowest score), sum (use sum of all scores). Default = max.')
     parser.add_option('-f', '--ctcf_f', type='string', help='Tabix-indexed CTCF peaks file in narrowPeak format.')
+    parser.add_option('-r', '--report_extension', dest="report_actual", action='store_false', default=True,
+                      help='Report actual ChIP-seq peak boundaries in output instead of peak +- extension.')
     
 
     (opt, args) = parser.parse_args(argv)
@@ -65,19 +87,9 @@ def main(argv):
 
     # Load CTCF Summits
     sys.stderr.write("Preparing CTCF summits list...\n")
-    CTCF_ChIP = lib.read_narrowPeak(opt.bs)
-    summits = {}
-    for index, row in CTCF_ChIP.iterrows():
-        # Assumes narrowPeak format!
-        chrom = row['chrom']
-        summit = row['chromStart'] + row['peak']
-        if chrom not in summits.keys():
-            summits[chrom] = set()
-        summits[chrom].add(summit)
-    for chrom in summits.keys():
-        summits[chrom] = sorted(list(summits[chrom]))
-    chroms = CTCF_ChIP.chrom.unique()
+    summits, chroms, CTCF_ChIP = prepare_summits(opt.bs, opt)
 
+    # Prepare reads from read-based sources
     sys.stderr.write('Preparing reads information...\n')
     read_info, read_numbers = lib.prepare_reads_info(signal_table)
 
@@ -114,22 +126,22 @@ def main(argv):
                                                             int(data.iloc[i].peak2),
                                                             probas[i,1],
                                                             y[i]))
-                """
-                bedope.write("{}\t{}\t{}\t{}\t{}\t{}\tNA\t{}\t.\t.\t1\n".format(chrom,
-                                                                                int(data.iloc[i,1]-opt.extension),
-                                                                                int(data.iloc[i,1]+opt.extension),
-                                                                                chrom,
-                                                                                int(data.iloc[i,2]-opt.extension),
-                                                                                int(data.iloc[i,2]+opt.extension),
-                                                                                probas[i,1]))
-                """
-                bedope.write("{}\t{}\t{}\t{}\t{}\t{}\tNA\t{}\t.\t.\t1\n".format(chrom,
-                                                                                int(data.iloc[i].start1),
-                                                                                int(data.iloc[i].end1),
-                                                                                chrom,
-                                                                                int(data.iloc[i].start2),
-                                                                                int(data.iloc[i].end2),
-                                                                                probas[i,1]))
+                if not opt.report_actual:
+                    bedope.write("{}\t{}\t{}\t{}\t{}\t{}\tNA\t{}\t.\t.\t1\n".format(chrom,
+                                                                                    int(data.iloc[i,1]-opt.extension),
+                                                                                    int(data.iloc[i,1]+opt.extension),
+                                                                                    chrom,
+                                                                                    int(data.iloc[i,2]-opt.extension),
+                                                                                    int(data.iloc[i,2]+opt.extension),
+                                                                                    probas[i,1]))
+                else:
+                    bedope.write("{}\t{}\t{}\t{}\t{}\t{}\tNA\t{}\t.\t.\t1\n".format(chrom,
+                                                                                    int(data.iloc[i].start1),
+                                                                                    int(data.iloc[i].end1),
+                                                                                    chrom,
+                                                                                    int(data.iloc[i].start2),
+                                                                                    int(data.iloc[i].end2),
+                                                                                    probas[i,1]))
                 iv = HTSeq.GenomicInterval(chrom, int(data.iloc[i,1]), int(data.iloc[i,2]), '.')
                 cvg[iv] += 1
 
