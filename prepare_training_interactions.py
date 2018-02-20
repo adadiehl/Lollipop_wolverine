@@ -15,7 +15,7 @@ import math
 import pandas as pd
 import HTSeq
 from optparse import OptionParser
-from lib import read_narrowPeak
+from lib import read_narrowPeak, prepare_bs_pool
 
 def find_summits_in_anchors(anchor, chrom_summits):
     """
@@ -33,20 +33,6 @@ def find_summits_in_anchors(anchor, chrom_summits):
     if overlapped == 0:
         ans = (anchor.start + anchor.end)/2
     return str(ans)
-
-
-def prepare_bs_pool(peak_f, chroms):
-    """
-    Prepare the ChIP-seq binding site pool.
-    bs_pool = {'chrom':[summit1, summit2,...]}
-    """
-
-    peak = read_narrowPeak(peak_f)
-    bs_pool = {}
-    for chrom in peak.chrom.unique():
-        if chrom in chroms and chrom != 'chrY':
-            bs_pool[chrom] = sorted(list(peak[peak['chrom'] == chrom].peak + peak[peak['chrom'] == chrom].chromStart))
-    return bs_pool
 
 
 def read_hic(hic_f, bs_pool):
@@ -189,7 +175,7 @@ def main(argv):
 
     sys.stderr.write("Reading in positive datasets...\n")
     # Build the binding stie pool: bs_pool = {'chrom':[summit1, summit2,...]} 
-    bs_pool = prepare_bs_pool(opt.peak, chroms)
+    bs_pool, chroms, peak = prepare_bs_pool(opt.peak, chroms, ["chrY"])
 
     # Load Hi-C loops: used to ensure that the randomly generated negative loops are not true loops identified in HiC.
     hic_loops = read_hic(opt.hic, bs_pool)

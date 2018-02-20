@@ -113,7 +113,29 @@ def get_features(chrom, start, end, feats_f, names, dtypes):
         if d == 'int' or d == 'int64' or d == 'float' or d == 'float64':
             feats[names[i]] = pd.to_numeric(feats[names[i]])
     return feats
-        
+
+
+def prepare_bs_pool(bs, chroms, exclude_chroms):
+    """
+    Prepare the ChIP-seq binding site pool.
+    bs_pool = {'chrom':[summit1, summit2,...]}
+    """
+    peak = read_narrowPeak(bs)
+    bs_pool = {}    
+    for index, row in peak.iterrows():
+        # Assumes narrowPeak format!
+        chrom = row['chrom']
+        summit = row['chromStart'] + row['peak']
+        if (chrom not in bs_pool.keys() and
+            chrom in chroms and
+            chrom not in exclude_chroms):
+            bs_pool[chrom] = set()
+        bs_pool[chrom].add(summit)
+    for chrom in bs_pool.keys():
+        bs_pool[chrom] = sorted(list(bs_pool[chrom]))
+    chroms = bs_pool.keys()
+    return bs_pool, chroms, peak
+
 
 def prepare_anchors(row, ext):
     """
@@ -251,7 +273,7 @@ def add_motif_pattern(train, Peak, opt):
     return train
                                                                                     
 
-def choose_feat(feats, col, opt):
+def choose_feat(feats, col, collapse):
     """
     Given a set of features and a selection criterion (in opt.collapse_peaks)
     choose the "best" row or aggregate over all rows for given column, and return
@@ -259,13 +281,13 @@ def choose_feat(feats, col, opt):
     """
     if feats.shape[0] == 0:
         return 0
-    if opt.collapse_peaks == "max":
+    if collapse == "max":
         return feats[col].max()
-    if opt.collapse_peaks == "min":
+    if collapse == "min":
         return feats[col].min()
-    if opt.collapse_peaks == "sum":
+    if collapse == "sum":
         return feats[col].sum()
-    if opt.collapse_peaks == "avg":
+    if collapse == "avg":
         return feats[col].mean()
 
 
@@ -296,6 +318,31 @@ def add_peak_feature(signal, train, BED, opt):
     signal2 = 'std_'+str(signal)
     train[signal1] = pd.Series(scores1, index = train.index)
     train[signal2] = pd.Series(scores2, index = train.index)
+    return train
+
+
+def add_peak_inbetween(signal, train, BED, opt):
+    """
+    This function adds "in-between" signals for peak features.
+    """
+    base1 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores1 = np.ctypeslib.as_array(base1.get_obj())
+    base2 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores2 = np.ctypeslib.as_array(base2.get_obj())
+    # Create the multiprocessing thread pool
+    pool = multiprocessing.Pool(processes = opt.procs,
+                                initializer = _init_peaks,
+                                initargs = (scores1, scores2))
+    map_args = []
+    for i in range(0,train.shape[0]):
+        map_args.append((i, train, BED, opt))
+        
+    pool.map(do_peak_inbetween_row, map_args)
+    pool.close()
+    pool.join()
+    
+    signal1 = "{}_inbetween".format(signal)
+    train[signal1] = pd.Series(scores1, index = train.index)
     return train
 
 
@@ -357,14 +404,54 @@ def do_peak_feat_row(map_args, def_param=(scores1,scores2)):
                            "float64",
                            "int64"])
     
-    score1 = choose_feat(feats1, "signalValue", opt)
-    score2 = choose_feat(feats2, "signalValue", opt)
+    score1 = choose_feat(feats1, "signalValue", opt.collapse_peaks)
+    score2 = choose_feat(feats2, "signalValue", opt.collapse_peaks)
     lock.acquire()
     scores1[i] = (score1+score2)/2.0
     scores2[i] = np.std([score1, score2])
     lock.release()
 
 
+def do_peak_inbetween_row(map_args, def_param=(scores1,scores2)):
+    """
+    Loop definition for multithreading over table rows within add_peak_features.
+    """
+    (i, train, BED, opt) = map_args
+    peaks = tb.open(BED)
+    row = train.iloc[i]
+
+    # Get all peak features between the anchor summits
+    feats1 = get_features(row.chrom,
+                          row.peak1,
+                          row.peak2,
+                          peaks,
+                          ["chrom",
+                           "chromStart",
+                           "chromEnd",
+                           "name",
+                           "score",
+                           "strand",
+                           "signalValue",
+                           "pValue",
+                           "qValue",
+                           "peak"],
+                          ["string",
+                           "int64",
+                           "int64",
+                           "string",
+                           "int64",
+                           "string",
+                           "float64",
+                           "float64",
+                           "float64",
+                           "int64"])
+    lock.acquire()
+    # Using "sum" to aggregate the scores should roughly approximate the read-based case
+    scores1[i] = choose_feat(feats1, "signalValue", "sum")
+    #scores2[i] = np.std(list(feats1.signalValue))
+    lock.release()
+
+    
 def add_bigWig_feature(train, Peak, opt):
     """                                                                                                           
     Adds scores from bigWig features.                                                                             
@@ -391,6 +478,7 @@ def add_bigWig_feature(train, Peak, opt):
     train['std_conservation'] = pd.Series(scores2)
 
     return train
+
 
 def get_bigWig_scores(map_args, def_param=(scores1,scores2)):
     """                                                                                                           
@@ -485,10 +573,9 @@ def prepare_features_for_interactions(data, summits, signal_table, read_info, re
         signal = row['Signal']
         Format = row['Format']
         Path = row['Path']
-        if signal == 'Motif':  # AGD: Don't use parens around conditionals
+        if signal == 'Motif':
             sys.stderr.write("\tAdding motif annotations...\n")
-            data = add_motif_pattern(data, Path, opt)
-        
+            data = add_motif_pattern(data, Path, opt)        
         elif signal == 'PhastCon':
             sys.stderr.write("\tAdding PhastCons conservation...\n")
             data = add_bigWig_feature(data, Path, opt)
@@ -503,8 +590,11 @@ def prepare_features_for_interactions(data, summits, signal_table, read_info, re
                 data = add_features(data, summits, read_info, read_numbers, signal, opt)
             elif Format == 'narrowPeak':
                 data = add_peak_feature(signal, data, Path, opt)
-                
+                if opt.in_between:
+                    # Add "in-between" peaks signal
+                    data = add_peak_inbetween(signal, data, Path, opt)
     return data
+
 
 
 

@@ -12,6 +12,7 @@ import pandas as pd
 from sklearn.externals import joblib
 import HTSeq
 import lib
+import GenomeData
 
 def load_signals_table(info_table):
     """
@@ -25,26 +26,6 @@ def load_signals_table(info_table):
             signal = row['Signal']
             signals.append(signal)
     return signal_table, signals
-
-
-def prepare_summits(bs, opt):
-    """                                                                                           
-    Prepare summits list for de-novo predictions.                                                 
-    """
-    CTCF_ChIP = lib.read_narrowPeak(bs)
-    summits = {}
-    for index, row in CTCF_ChIP.iterrows():
-        # Assumes narrowPeak format!
-        chrom = row['chrom']
-        summit = row['chromStart'] + row['peak']
-        if chrom not in summits.keys():
-            summits[chrom] = set()
-            summits[chrom].add(summit)
-    for chrom in summits.keys():
-        summits[chrom] = sorted(list(summits[chrom]))
-    chroms = summits.keys()
-    return summits, chroms, CTCF_ChIP
-                                                                                            
 
 
 def main(argv):
@@ -70,6 +51,8 @@ def main(argv):
     parser.add_option('-f', '--ctcf_f', type='string', help='Tabix-indexed CTCF peaks file in narrowPeak format.')
     parser.add_option('-r', '--report_extension', dest="report_actual", action='store_false', default=True,
                       help='Report actual ChIP-seq peak boundaries in output instead of peak +- extension.')
+    parser.add_option('-i', '--no_in_between_peaks', dest="in_between", action='store_false', default=True,
+                      help='Do not include "in-between" peaks in training and predictions.')
     
 
     (opt, args) = parser.parse_args(argv)
@@ -87,7 +70,7 @@ def main(argv):
 
     # Load CTCF Summits
     sys.stderr.write("Preparing CTCF summits list...\n")
-    summits, chroms, CTCF_ChIP = prepare_summits(opt.bs, opt)
+    summits, chroms, CTCF_ChIP = lib.prepare_bs_pool(opt.bs, GenomeData.hg19_chroms, ["chrY"])
 
     # Prepare reads from read-based sources
     sys.stderr.write('Preparing reads information...\n')
@@ -107,6 +90,7 @@ def main(argv):
                                         CTCF_ChIP[CTCF_ChIP.chrom == chrom],
                                         opt.ctcf_f, opt.proximal, opt.distal, opt)
         data = lib.prepare_features_for_interactions(data, summits, signal_table, read_info, read_numbers, opt)
+        sys.stderr.write("{}\n".format(data.head()))
 
         # Strip genomic coordinates and convert annotations to np.matrix form
         X = data.iloc[:,7:].as_matrix()
