@@ -14,19 +14,6 @@ import HTSeq
 import lib
 import GenomeData
 
-def load_signals_table(info_table):
-    """
-    Read the signals table from disk.
-    TO-DO: Is this really needed??
-    """
-    signal_table = pd.read_table(info_table)
-    signals = []
-    for index, row in signal_table.iterrows():
-        if (row['Signal'] != 'Motif' and row['Signal'] != 'Gene expression' and row['Signal'] != 'PhastCon'):
-            signal = row['Signal']
-            signals.append(signal)
-    return signal_table, signals
-
 
 def main(argv):
     parser = OptionParser()
@@ -51,7 +38,7 @@ def main(argv):
     parser.add_option('-f', '--ctcf_f', type='string', help='Tabix-indexed CTCF peaks file in narrowPeak format.')
     parser.add_option('-r', '--report_extension', dest="report_actual", action='store_false', default=True,
                       help='Report actual ChIP-seq peak boundaries in output instead of peak +- extension.')
-    parser.add_option('-i', '--no_in_between_peaks', dest="in_between", action='store_false', default=True,
+    parser.add_option('-n', '--no_in_between_peaks', dest="in_between", action='store_false', default=True,
                       help='Do not include "in-between" peaks in training and predictions.')
     
 
@@ -66,7 +53,7 @@ def main(argv):
     loop_cvg = opt.outdir+'/Lollipop_loops_cvg.bedgraph'
 
     # Read in the signals table
-    signal_table, signals = load_signals_table(opt.info_table)
+    signal_table, signals = lib.load_signals_table(opt.info_table)
 
     # Load CTCF Summits
     sys.stderr.write("Preparing CTCF summits list...\n")
@@ -90,7 +77,7 @@ def main(argv):
                                         CTCF_ChIP[CTCF_ChIP.chrom == chrom],
                                         opt.ctcf_f, opt.proximal, opt.distal, opt)
         data = lib.prepare_features_for_interactions(data, summits, signal_table, read_info, read_numbers, opt)
-        sys.stderr.write("{}\n".format(data.head()))
+        #sys.stderr.write("{}\n".format(data.head()))
 
         # Strip genomic coordinates and convert annotations to np.matrix form
         X = data.iloc[:,7:].as_matrix()

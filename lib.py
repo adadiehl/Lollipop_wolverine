@@ -221,7 +221,7 @@ def find_motif_pattern(map_args, def_param=(scores1, scores2, pattern)):
         elif feats2.shape[0] > 0:
             avg = feats2.score.max()/2.0
             sd = np.std([0, feats2.score.max()])
-            # else no motifs -- avg = sd = pat = 0
+        # else no motifs -- avg = sd = pat = 0
     else:
         index1 = feats1.score.idxmax()
         index2 = feats2.score.idxmax()
@@ -585,17 +585,25 @@ def prepare_features_for_interactions(data, summits, signal_table, read_info, re
         else:
             sys.stderr.write("\tProcessing {} features...\n".format(signal))
             if Format == 'bed':
-                #data = add_local_feature(signal, data, Path)
-                #data = add_regional_feature_by_reads(signal, data, anchors, Path)
                 data = add_features(data, summits, read_info, read_numbers, signal, opt)
             elif Format == 'narrowPeak':
                 data = add_peak_feature(signal, data, Path, opt)
                 if opt.in_between:
                     # Add "in-between" peaks signal
-                    data = add_peak_inbetween(signal, data, Path, opt)
+                    data = add_peak_inbetween(signal, data, Path, opt)                
     return data
 
-
+def load_signals_table(info_table):
+    """
+    Read the signals table from disk.
+    """
+    signal_table = pd.read_table(info_table)
+    signals = []
+    for index, row in signal_table.iterrows():
+        if (row['Signal'] != 'Motif' and row['Signal'] != 'Gene expression' and row['Signal'] != 'PhastCon'):
+            signal = row['Signal']
+            signals.append(signal)
+    return signal_table, signals
 
 
 """
@@ -606,9 +614,7 @@ End Added by AGD
 def prepare_reads_info(signal_table):
     """
     This function is to prepare the reads info from raw .bed files for the local features.
-
     Returned: read_info = {factor:{chrom:[start1, start2, start3]}}
-
     """
     read_info = {}  # read_info = {factor:{chrom:[start1, start2, start3]}}
     read_numbers = {} # read_numbers = {'H3K4me1':read_number, ...}
@@ -699,12 +705,12 @@ def add_anchor_conservation(train, chrom, Peak):
     return train
 
 
-def add_features(data, anchor_motifs, read_info, read_numbers, signals):
+def add_features(data, anchors, read_info, read_numbers, signals):
     """
     This function is to add both the local and inbetween features to the data.
-    read_info = {factor:{chrom:[start1, start2, start3]}}
+    read_info = {factor:{chrom:[peak1, peak2, peak3]}}
     inbetween_signals = {factor:{'ChrXX':{summit:peak_height}}}
-    anchor_motifs = {'chrXX':[start1, start2...]}
+    anchors = {'chrXX':[peak1, peak2...]}
     """
     extension = 2000
 
@@ -712,22 +718,27 @@ def add_features(data, anchor_motifs, read_info, read_numbers, signals):
         print "Preparing features for "+str(factor)+'...'
         avg_signal = 'avg_'+str(factor)
         std_signal = 'std_'+str(factor)
-        inbetween_signal = str(factor)+'_in-between';upstream_signal = str(factor)+'_upstream';downstream_signal = str(factor)+'_downstream'
+        inbetween_signal = str(factor)+'_in-between'
+        upstream_signal = str(factor)+'_upstream'
+        downstream_signal = str(factor)+'_downstream'
 
         reads = read_info[factor]
         read_number = read_numbers[factor]
         anchor1_RPKM = []
         anchor2_RPKM = []
-        in_between = [];upstream = [];downstream = []
+
+        in_between = []
+        upstream = []
+        downstream = []
 
         for index, row in data.iterrows():
             chrom = row['chrom']
-            start1 = int(row['peak1'])
-            start2 = int(row['peak2'])
+            peak1 = int(row['peak1'])
+            peak2 = int(row['peak2'])
 
             # Get the RPKM read counts on anchors
-            count1 = bisect.bisect_right(reads[chrom], start1+extension) - bisect.bisect_left(reads[chrom], start1-extension)
-            count2 = bisect.bisect_right(reads[chrom], start2+extension) - bisect.bisect_left(reads[chrom], start2-extension)
+            count1 = bisect.bisect_right(reads[chrom], peak1+extension) - bisect.bisect_left(reads[chrom], peak1-extension)
+            count2 = bisect.bisect_right(reads[chrom], peak2+extension) - bisect.bisect_left(reads[chrom], peak2-extension)
             RPKM1 = float(count1)/(float(read_number)*2*extension)*1000000000
             RPKM2 = float(count2)/(float(read_number)*2*extension)*1000000000
             anchor1_RPKM.append(np.mean([RPKM1, RPKM2]))
@@ -735,22 +746,23 @@ def add_features(data, anchor_motifs, read_info, read_numbers, signals):
 
             # Get the RPKM values of the looped regions
             strength = 0
-            count = bisect.bisect_right(reads[chrom], start2) - bisect.bisect_left(reads[chrom], start1)
-            strength = float(count)/float(abs(start2 - start1)*read_number)*1e+9
+            count = bisect.bisect_right(reads[chrom], peak2) - bisect.bisect_left(reads[chrom], peak1)
+            strength = float(count)/float(abs(peak2 - peak1)*read_number)*1e+9
             in_between.append(strength)
-            index1 = anchor_motifs[chrom].index(start1)
-            index2 = anchor_motifs[chrom].index(start2)
+            
+            index1 = anchors[chrom].index(peak1)
+            index2 = anchors[chrom].index(peak2)
             if index1 != '0':
-                up_motif = anchor_motifs[chrom][index1 - 1]
-                up_count = bisect.bisect_right(reads[chrom],start1) - bisect.bisect_left(reads[chrom], up_motif)
-                up_strength = float(up_count)/float(abs(up_motif-start1)*read_number)*1e+9
+                up_motif = anchors[chrom][index1 - 1]
+                up_count = bisect.bisect_right(reads[chrom],peak1) - bisect.bisect_left(reads[chrom], up_motif)
+                up_strength = float(up_count)/float(abs(up_motif-peak1)*read_number)*1e+9
             else:
                 up_strength = 0
             upstream.append(up_strength)
-            if index2 != (len(anchor_motifs[chrom])-1):
-                down_motif = anchor_motifs[chrom][index2 + 1]
-                down_count = bisect.bisect_right(reads[chrom], down_motif) - bisect.bisect_left(reads[chrom], start2)
-                down_strength = float(down_count)/float(abs(down_motif-start2)*read_number)*1e+9
+            if index2 != (len(anchors[chrom])-1):
+                down_motif = anchors[chrom][index2 + 1]
+                down_count = bisect.bisect_right(reads[chrom], down_motif) - bisect.bisect_left(reads[chrom], peak2)
+                down_strength = float(down_count)/float(abs(down_motif-peak2)*read_number)*1e+9
             else:
                 down_strength = 0
             downstream.append(down_strength)
@@ -767,7 +779,6 @@ def add_gene_expression(data, Peak):
     This function is to add the gene expression value of the looped region as a feature.The gene expression file's format is:
     gene_id   locus   value
     A1BG    chr19:coordinate1-coordiate2   1.31
-
     """
     sys.stderr.write('Preparing features for gene expression...\n')
     exp_file = pd.read_table(Peak)
