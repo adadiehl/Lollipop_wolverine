@@ -15,7 +15,7 @@ Added by AGD
 import multiprocessing
 import tabix as tb
 import ctypes
-
+from scipy.stats import variation
 
 """
 Global Variables
@@ -412,14 +412,14 @@ def add_gene_expr(signal, train, BED, opt):
                                 initargs = (scores1, scores2))
     map_args = []
     for i in range(0,train.shape[0]):
-        map_args.append((i, train, BED, fcol, opt))
+        map_args.append((i, train, BED, opt))
     
     pool.map(do_gene_expr_row, map_args)
     pool.close()
     pool.join()
     
     signal1 = "{}_avg".format(signal)
-    signal2 = "{}_stdev".format(signal)
+    signal2 = "{}_variation".format(signal)
     train[signal1] = pd.Series(scores1, index = train.index)
     train[signal2] = pd.Series(scores2, index = train.index)
     return train
@@ -606,7 +606,7 @@ def do_gene_expr_row(map_args, def_param=(scores1,scores2)):
     """
     Loop definition for multithreading over table rows within add_gene_expr.
     """
-    (i, train, BED, fcol, opt) = map_args
+    (i, train, BED, opt) = map_args
     peaks = tb.open(BED)
     row = train.iloc[i]
     
@@ -619,26 +619,19 @@ def do_gene_expr_row(map_args, def_param=(scores1,scores2)):
                            "chromStart",
                            "chromEnd",
                            "name",
-                           "score",
+                           "id",
                            "strand",
-                           "signalValue",
-                           "pValue",
-                           "qValue",
-                           "peak"],
+                           "signalValue"],
                           ["string",
                            "int64",
                            "int64",
                            "string",
-                           "int64",
                            "string",
-                           "float64",
-                           "float64",
-                           "float64",
-                           "int64"])
+                           "string",
+                           "float64"])
     lock.acquire()
-    # Using "sum" to aggregate the scores should roughly approximate the read-based case
-    scores1[i] = choose_feat(feats1, "signalValue", "sum")
-    scores2[i] = np.std(list(feats1.signalValue))
+    scores1[i] = choose_feat(feats1, "signalValue", "avg")
+    scores2[i] = variation(list(feats1.signalValue))
     lock.release()
                                                 
     
