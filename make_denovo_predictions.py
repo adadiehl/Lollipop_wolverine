@@ -40,8 +40,9 @@ def main(argv):
                       help='Report actual ChIP-seq peak boundaries in output instead of peak +- extension.')
     parser.add_option('-n', '--no_in_between_peaks', dest="in_between", action='store_false', default=True,
                       help='Do not include "in-between" peaks in training and predictions.')
+    parser.add_option('-g','--no_flanking_peaks', dest="flanking",action='store_false', default=True,
+                      help='Do not include "upstream" and "downstream" peaks in training and predictions.')
     
-
     (opt, args) = parser.parse_args(argv)
     if len(argv) < 8:
         parser.print_help()

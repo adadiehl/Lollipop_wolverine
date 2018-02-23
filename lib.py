@@ -137,6 +137,31 @@ def prepare_bs_pool(bs, chroms, exclude_chroms):
     return bs_pool, chroms, peak
 
 
+def prepare_anchors_pool(bs, chroms, exclude_chroms):
+    """
+    Prepare the ChIP-seq anchors site pool.
+    anchors_pool = {'chrom':[(start1, end1, summit1), (start2, end2, summit2),...]}
+    """
+    peak = read_narrowPeak(bs)
+    bs_pool = {}
+    for index, row in peak.iterrows():
+        # Assumes narrowPeak format!
+        chrom = row['chrom']
+        summit = row['chromStart'] + row['peak']
+        if (chrom not in bs_pool.keys() and
+            chrom in chroms and
+            chrom not in exclude_chroms):
+            bs_pool[chrom] = set()
+        bs_pool[chrom].add((row['chromStart'],
+                            row['chromEnd'],
+                            summit))
+    for chrom in bs_pool.keys():
+        bs_pool[chrom] = sorted(list(bs_pool[chrom]))
+    chroms = bs_pool.keys()
+    return bs_pool, chroms, peak
+                                                                                            
+
+
 def prepare_anchors(row, ext):
     """
     Added by AGD, 1/26/2018
@@ -346,6 +371,59 @@ def add_peak_inbetween(signal, train, BED, opt):
     return train
 
 
+def add_peak_flanking(signal, train, BED, anchors, opt):
+    """
+    This function adds "upstream" and "downstream" signals for peak features.
+    """
+    base1 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores1 = np.ctypeslib.as_array(base1.get_obj())
+    base2 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores2 = np.ctypeslib.as_array(base2.get_obj())
+    # Create the multiprocessing thread pool
+    pool = multiprocessing.Pool(processes = opt.procs,
+                                initializer = _init_peaks,
+                                initargs = (scores1, scores2))
+    map_args = []
+    for i in range(0,train.shape[0]):
+        map_args.append((i, train, BED, anchors, opt))
+
+    pool.map(do_peak_flanking_row, map_args)
+    pool.close()
+    pool.join()
+    
+    signal1 = "{}_upstream".format(signal)
+    signal2 = "{}_downstream".format(signal)
+    train[signal1] = pd.Series(scores1, index = train.index)
+    train[signal2] = pd.Series(scores2, index = train.index)
+    return train
+
+
+def add_gene_expr(signal, train, BED, opt):
+    """
+    This function adds gene expression signal between peak features.
+    """
+    base1 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores1 = np.ctypeslib.as_array(base1.get_obj())
+    base2 = multiprocessing.Array(ctypes.c_double, train.shape[0])
+    scores2 = np.ctypeslib.as_array(base2.get_obj())
+    # Create the multiprocessing thread pool
+    pool = multiprocessing.Pool(processes = opt.procs,
+                                initializer = _init_peaks,
+                                initargs = (scores1, scores2))
+    map_args = []
+    for i in range(0,train.shape[0]):
+        map_args.append((i, train, BED, fcol, opt))
+    
+    pool.map(do_gene_expr_row, map_args)
+    pool.close()
+    pool.join()
+    
+    signal1 = "{}_avg".format(signal)
+    signal2 = "{}_stdev".format(signal)
+    train[signal1] = pd.Series(scores1, index = train.index)
+    train[signal2] = pd.Series(scores2, index = train.index)
+    return train
+
 def do_peak_feat_row(map_args, def_param=(scores1,scores2)):
     """
     Loop definition for multithreading over table rows within add_peak_features.
@@ -414,7 +492,7 @@ def do_peak_feat_row(map_args, def_param=(scores1,scores2)):
 
 def do_peak_inbetween_row(map_args, def_param=(scores1,scores2)):
     """
-    Loop definition for multithreading over table rows within add_peak_features.
+    Loop definition for multithreading over table rows within add_peak_inbetween.
     """
     (i, train, BED, opt) = map_args
     peaks = tb.open(BED)
@@ -451,6 +529,118 @@ def do_peak_inbetween_row(map_args, def_param=(scores1,scores2)):
     #scores2[i] = np.std(list(feats1.signalValue))
     lock.release()
 
+
+def do_peak_flanking_row(map_args, def_param=(scores1,scores2)):
+    """
+    Loop definition for multithreading over table rows within add_peak_features.
+    """
+    (i, train, BED, anchors, opt) = map_args
+    peaks = tb.open(BED)
+    row = train.iloc[i]
+    index1 = anchors[row.chrom].index(row.peak1)
+    index2 = anchors[row.chrom].index(row.peak2)
+
+    if index1 > 0:
+        feats1 = get_features(row.chrom,
+                              anchors[row.chrom][index1-1],
+                              row.peak1,
+                              peaks,
+                              ["chrom",
+                               "chromStart",
+                               "chromEnd",
+                               "name",
+                               "score",
+                               "strand",
+                               "signalValue",
+                               "pValue",
+                               "qValue",
+                               "peak"],
+                              ["string",
+                               "int64",
+                               "int64",
+                               "string",
+                               "int64",
+                               "string",
+                               "float64",
+                               "float64",
+                               "float64",
+                               "int64"])
+        score1 = choose_feat(feats1, "signalValue", "sum")
+    else:
+        score1 = 0
+    if index2 < len(anchors[row.chrom])-1:
+        feats2 = get_features(row.chrom,
+                              row.peak2,
+                              anchors[row.chrom][index2+1],
+                              peaks,
+                              ["chrom",
+                               "chromStart",
+                               "chromEnd",
+                               "name",
+                               "score",
+                               "strand",
+                               "signalValue",
+                               "pValue",
+                               "qValue",
+                               "peak"],
+                              ["string",
+                               "int64",
+                               "int64",
+                               "string",
+                               "int64",
+                               "string",
+                               "float64",
+                               "float64",
+                               "float64",
+                               "int64"])
+        score2 = choose_feat(feats2, "signalValue", "sum")
+    else:
+        score2 = 0
+    lock.acquire()
+    scores1[i] = score1
+    scores2[i] = score2
+    lock.release()
+
+
+def do_gene_expr_row(map_args, def_param=(scores1,scores2)):
+    """
+    Loop definition for multithreading over table rows within add_gene_expr.
+    """
+    (i, train, BED, fcol, opt) = map_args
+    peaks = tb.open(BED)
+    row = train.iloc[i]
+    
+    # Get all peak features between the anchor summits
+    feats1 = get_features(row.chrom,
+                          row.peak1,
+                          row.peak2,
+                          peaks,
+                          ["chrom",
+                           "chromStart",
+                           "chromEnd",
+                           "name",
+                           "score",
+                           "strand",
+                           "signalValue",
+                           "pValue",
+                           "qValue",
+                           "peak"],
+                          ["string",
+                           "int64",
+                           "int64",
+                           "string",
+                           "int64",
+                           "string",
+                           "float64",
+                           "float64",
+                           "float64",
+                           "int64"])
+    lock.acquire()
+    # Using "sum" to aggregate the scores should roughly approximate the read-based case
+    scores1[i] = choose_feat(feats1, "signalValue", "sum")
+    scores2[i] = np.std(list(feats1.signalValue))
+    lock.release()
+                                                
     
 def add_bigWig_feature(train, Peak, opt):
     """                                                                                                           
@@ -582,15 +772,24 @@ def prepare_features_for_interactions(data, summits, signal_table, read_info, re
         elif signal == 'Gene expression':
             sys.stderr.write("\tAdding gene expression...\n")
             data = add_gene_expression(data, Path, opt)
+        elif signal == "RNA-seq":
+            sys.stderr.write("\tAdding gene expression...\n")
+            data = add_gene_expr(signal, data, Path, opt)
         else:
             sys.stderr.write("\tProcessing {} features...\n".format(signal))
             if Format == 'bed':
                 data = add_features(data, summits, read_info, read_numbers, signal, opt)
             elif Format == 'narrowPeak':
+                sys.stderr.write("\t\tPreparing summit signals...\n")
                 data = add_peak_feature(signal, data, Path, opt)
                 if opt.in_between:
                     # Add "in-between" peaks signal
-                    data = add_peak_inbetween(signal, data, Path, opt)                
+                    sys.stderr.write("\t\tPreparing in-betweem signals...\n")
+                    data = add_peak_inbetween(signal, data, Path, opt)
+                if opt.flanking:
+                    # Add "upstream" and "downstream" peak signals
+                    sys.stderr.write("\t\tPreparing flanking signals...\n")
+                    data = add_peak_flanking(signal, data, Path, summits, opt)
     return data
 
 def load_signals_table(info_table):
@@ -650,7 +849,6 @@ def prepare_reads_info(signal_table):
             BED_reader.close()
 
     return (read_info, read_numbers)
-
 
 
 def assign_motif_pattern(strand1, strand2):

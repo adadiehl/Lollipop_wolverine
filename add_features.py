@@ -270,7 +270,8 @@ def main(argv):
                           help='How to handle multiple overlapping peak features. Allowed values: max (use maximum score), avg (average all scores), min (use lowest score), sum (use sum of all scores). Default = max.')        
         parser.add_option('-n', '--no_in_between_peaks', dest="in_between", action='store_false', default=True,
                           help='Do not include "in-between" peaks in training and predictions.')
-        
+        parser.add_option('-g', '--no_flanking_peaks', dest="flanking", action='store_false', default=True,
+                          help='Do not include "upstream" and "downstream" peaks in training and predictions.')
         
 	(opt, args) = parser.parse_args(argv)
 	if len(argv) < 6:
