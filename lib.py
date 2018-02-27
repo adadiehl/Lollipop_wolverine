@@ -639,12 +639,14 @@ def do_gene_expr_row(map_args, def_param=(scores1,scores2)):
 def get_cv(vals):
     """
     Get coefficient of variation given a list of values.
+    Return values are set up to differentiate between
+    no data, zero expression, and single value cases.
     """
     if len(vals) == 0:
-        return 0
+        return -500
+    if len(vals) == 1:
+        return 500
     if np.mean(vals) == 0:
-        return 0
-    if min(vals) < 0:
         return 0
     return variation(vals)
     
