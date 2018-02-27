@@ -631,9 +631,22 @@ def do_gene_expr_row(map_args, def_param=(scores1,scores2)):
                            "float64"])
     lock.acquire()
     scores1[i] = choose_feat(feats1, "signalValue", "avg")
-    scores2[i] = variation(list(feats1.signalValue))
+    scores2[i] = 0
+    if feats1.shape[0] > 1:
+        scores2[i] = get_cv(list(feats1.signalValue))
     lock.release()
-                                                
+
+def get_cv(vals):
+    """
+    Get coefficient of variation given a list of values.
+    """
+    if len(vals) == 0:
+        return 0
+    if np.mean(vals) == 0:
+        return 0
+    if min(vals) < 0:
+        return 0
+    return variation(vals)
     
 def add_bigWig_feature(train, Peak, opt):
     """                                                                                                           
