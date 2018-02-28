@@ -15,7 +15,7 @@ import math
 import pandas as pd
 import HTSeq
 from optparse import OptionParser
-from lib import read_narrowPeak, prepare_bs_pool
+from lib import read_narrowPeak, prepare_bs_pool, prepare_anchors_pool
 
 def find_summits_in_anchors(anchor, chrom_summits):
     """
@@ -24,7 +24,8 @@ def find_summits_in_anchors(anchor, chrom_summits):
     """
     chrom = anchor.chrom
     overlapped = 0
-    for summit in chrom_summits:
+    for row in chrom_summits:
+        summit = row[2]
         pos = HTSeq.GenomicPosition(chrom, summit,'.')
         if pos.overlaps(anchor):
             ans = summit
@@ -98,11 +99,15 @@ def find_positive_interactions(chiapet, hic_loops, bs_pool, chroms, outfile, opt
                             true_loops[chrom] = []
                     
                         true_loops[chrom].append((int(anchor1_summit), int(anchor2_summit)))
-                        outfile.write("{}\t{}\t{}\t{}\t{}\n".format(chrom,
-                                                                    anchor1_summit,
-                                                                    anchor2_summit,
-                                                                    1,
-                                                                    distance))
+                        outfile.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(chrom,
+                                                                                    row['start1'],
+                                                                                    row['end1'],
+                                                                                    row['start2'],
+                                                                                    row['end2'],
+                                                                                    anchor1_summit,
+                                                                                    anchor2_summit,
+                                                                                    1,
+                                                                                    distance))
                     else:
                         if chrom not in less_sig_loops.keys():
                             less_sig_loops[chrom] = []
@@ -120,10 +125,12 @@ def prepare_negative_interactions(true_loops, less_sig_loops, hic_loops, bs_pool
     total = 0
     for chrom in true_loops.keys():
         for i_left in xrange(len(bs_pool[chrom])-1):
-            m_left = bs_pool[chrom][i_left]
+            #m_left = bs_pool[chrom][i_left]
+            m_left = bs_pool[chrom][i_left][2]
             for i_right in xrange(i_left+1, len(bs_pool[chrom])):
                 good = False
-                m_right = bs_pool[chrom][i_right]
+                #m_right = bs_pool[chrom][i_right]
+                m_right = bs_pool[chrom][i_right][2]
                 length = m_right - m_left
                 if length >= minLength and length <= maxLength and (m_left, m_right) not in true_loops[chrom]:
                     if chrom in less_sig_loops.keys():
@@ -133,7 +140,7 @@ def prepare_negative_interactions(true_loops, less_sig_loops, hic_loops, bs_pool
                                     if (m_left, m_right) not in hic_loops[chrom]:
                                         good = True
                             else:
-                                good = True                                
+                                good = True
                     else:
                         if opt.use_hic:
                             if chrom in hic_loops.keys():
@@ -142,7 +149,22 @@ def prepare_negative_interactions(true_loops, less_sig_loops, hic_loops, bs_pool
                         else:
                             good = True
                 if good:
-                    iv = HTSeq.GenomicInterval(chrom, m_left, m_right, '.')
+                    #iv = HTSeq.GenomicInterval(chrom, m_left, m_right, '.')
+                    iv = pd.Series([chrom,
+                                    bs_pool[chrom][i_left][0],
+                                    bs_pool[chrom][i_left][1],
+                                    bs_pool[chrom][i_right][0],
+                                    bs_pool[chrom][i_right][1],
+                                    m_left,
+                                    m_right],
+                                   index=["chrom",
+                                          "start1",
+                                          "end1",
+                                          "start2",
+                                          "end2",
+                                          "peak1",
+                                          "peak2"])
+                    
                     negative_interactions.append(iv)
                     total += 1
                     
@@ -175,18 +197,29 @@ def main(argv):
 
     sys.stderr.write("Reading in positive datasets...\n")
     # Build the binding stie pool: bs_pool = {'chrom':[summit1, summit2,...]} 
-    bs_pool, chroms, peak = prepare_bs_pool(opt.peak, chroms, ["chrY"])
+    bs_pool, chroms, peak = prepare_anchors_pool(opt.peak, chroms, ["chrY"])
 
     # Load Hi-C loops: used to ensure that the randomly generated negative loops are not true loops identified in HiC.
     hic_loops = read_hic(opt.hic, bs_pool)
 
     sys.stderr.write("Preparing positive interactions...\n")
     # Print the header
+    """
     outfile.write('{}\t{}\t{}\t{}\t{}\n'.format('chrom',
                                                 'peak1',
                                                 'peak2',
                                                 'response',
                                                 'length'))
+    """
+    outfile.write('{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n'.format('chrom',
+                                                                'start1',
+                                                                'end1',
+                                                                'start2',
+                                                                'end2',
+                                                                'peak1',
+                                                                'peak2',
+                                                                'response',
+                                                                'length'))
     NumPos, true_loops, less_sig_loops = find_positive_interactions(opt.chiapet, hic_loops, bs_pool, chroms, outfile, opt)
     Ratio = opt.ratio # Ratio = 5 means 5 negative interaction will be generated for each positive interaction.
     NumNeg = NumPos*Ratio # NumNeg is the totoal number of negative interactions.          
@@ -199,19 +232,28 @@ def main(argv):
 
     if NumNeg >= len(negative_interactions):
         sys.stderr.write("The total number of negative interactions is less than {} times the number of positive loops. Using all interactions.\n".format(opt.ratio))
-        NumNeg = len(negative_interactions)
+        idx = range(0,len(negative_interactions)-1)
     else:                
-        sys.stderr.write("Randomly selecting {} negative loops...".format(NumNeg))
-
-    selected_neg = np.random.choice(negative_interactions, NumNeg, replace=False)
+        sys.stderr.write("Randomly selecting {} negative loops...\n".format(NumNeg))
+        idx = np.random.choice(range(0,len(negative_interactions)-1), NumNeg, replace=False)
     
     sys.stderr.write("Writing results...\n")
-    for iv in selected_neg:
-        length = iv.end - iv.start
-        outline = iv.chrom+'\t'+str(iv.start)+'\t'+str(iv.end)+'\t'+str(0)+'\t'+str(length)+'\n'
-        outfile.write(outline)
-
-
+    for i in idx:
+        iv = negative_interactions[i]
+        length = iv.peak2 - iv.peak1
+        #outline = iv.chrom+'\t'+str(iv.start)+'\t'+str(iv.end)+'\t'+str(0)+'\t'+str(length)+'\n'
+        #outfile.write(outline)
+        outfile.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(iv.chrom,
+                                                                    iv.start1,
+                                                                    iv.end1,
+                                                                    iv.start2,
+                                                                    iv.end2,
+                                                                    iv.peak1,
+                                                                    iv.peak2,
+                                                                    0,
+                                                                    length))
+        
+        
     outfile.close()
 
 if __name__ == "__main__":
