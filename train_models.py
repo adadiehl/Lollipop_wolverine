@@ -54,7 +54,7 @@ def fit_and_score_CV(estimator, X, y, opt, n_folds=10, stratify=True):
     return ys
 
 def get_pr(clf,data):
-    X = data.iloc[:,4:]
+    X = data.iloc[:,8:]
     Y = np.array(data['response'])
     X = X.as_matrix()
     y_true, y_pred = Y, clf.predict(X)
