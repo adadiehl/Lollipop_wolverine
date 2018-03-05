@@ -182,7 +182,7 @@ def main(argv):
     parser.add_option('-u', '--max_loop_size', type=int, default=1000000,
                       help="Maximum loop size.")
     parser.add_option('-r', '--ratio', type=int, default=5,
-                      help="Ratio of negative to positive interactions. Default 5.")
+                      help="Ratio of negative to positive interactions. Default 5. Set to 0 to retain all negative interactions.")
     parser.add_option('-z', '--use_hic', action='store_true', default=False,
                       help="Use Hi-C data as a supplement to ChIA-pet loops in finding negative loops.")
     
@@ -230,9 +230,11 @@ def main(argv):
                                                                  opt)
     sys.stderr.write('Found {} negative loops in total\n'.format(total))
 
+    idx = range(0,len(negative_interactions)-1)
     if NumNeg >= len(negative_interactions):
         sys.stderr.write("The total number of negative interactions is less than {} times the number of positive loops. Using all interactions.\n".format(opt.ratio))
-        idx = range(0,len(negative_interactions)-1)
+    elif NumNeg == 0:
+        sys.stderr.write("opt.ratio set to 0: using all negative interactions.\n")
     else:                
         sys.stderr.write("Randomly selecting {} negative loops...\n".format(NumNeg))
         idx = np.random.choice(range(0,len(negative_interactions)-1), NumNeg, replace=False)
