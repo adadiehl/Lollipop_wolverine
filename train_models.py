@@ -53,6 +53,8 @@ def fit_and_score_CV(estimator, X, y, opt, n_folds=10, stratify=True):
     ys = get_true_and_proba(estimator, X, y, n_folds, cv_arg, opt)    
     return ys
 
+"""
+# This doesn't seem to be used!
 def get_pr(clf,data):
     X = data.iloc[:,8:]
     Y = np.array(data['response'])
@@ -62,10 +64,10 @@ def get_pr(clf,data):
     precisions, recalls, thresholds = precision_recall_curve(y_true, probas[:,1])
     au_pr = average_precision_score(y_true, probas[:,1], average='micro')
     return ((recalls,precisions,au_pr))
+"""
 
 
-
-def main(argv):
+def main(argv):    
     parser = OptionParser()
     parser.add_option("-t", "--train", action="store", type="string", dest="train", metavar="<file>", help="The path of the training data")
     parser.add_option("-o", "--output", action="store", type="string", dest="output", metavar="<file>", help="The complete path for the resulting model and relevant results")
@@ -80,6 +82,10 @@ def main(argv):
     if len(argv) < 4:
         parser.print_help()
         sys.exit(1)
+
+    # Disable connection to local display to allow running in background
+    # without an active parent X11 connection.
+    plt.ioff()
         
     print 'Reading in features...'
     data = pd.read_table(opt.train)
@@ -92,7 +98,7 @@ def main(argv):
     n2p = float(num_neg)/float(num_pos)
     print 'Negative samples were '+str(n2p)+' times more than the positive loops...'
 
-    X = data.iloc[:,4:].as_matrix()
+    X = data.iloc[:,8:].as_matrix()
     Y = np.array(data['response'])
 
     # Use Random Forest classifier to predict interactions
