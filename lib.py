@@ -16,6 +16,7 @@ import multiprocessing
 import tabix as tb
 import ctypes
 from scipy.stats import variation
+import pyBigWig
 
 """
 Global Variables
@@ -170,12 +171,19 @@ def prepare_anchors(row, ext):
     Inputs:
         row = a row from the training data table
         ext = the number of bp to extend the peak up and downstream.
+              ext=0 causes actual element boundaries to be returned.
     """
     chrom = row['chrom']
-    start1 = row['peak1'] - ext
-    start2 = row['peak2'] - ext
-    end1 = row['peak1'] + ext
-    end2 = row['peak2'] + ext
+    if ext > 0:
+        start1 = row['peak1'] - ext
+        start2 = row['peak2'] - ext
+        end1 = row['peak1'] + ext
+        end2 = row['peak2'] + ext
+    else:
+        start1 = row['start1']
+        start2 = row['start2']
+        end1 = row['end1']
+        end2 = row['end2']
     anchor1 = HTSeq.GenomicInterval(chrom, start1, end1, '.')
     anchor2 = HTSeq.GenomicInterval(chrom, start2, end2, '.')
     return anchor1, anchor2

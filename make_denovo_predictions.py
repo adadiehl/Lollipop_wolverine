@@ -32,7 +32,7 @@ def main(argv):
     parser.add_option('-m', '--motif_extension', type=int, default=500,
                       help='Size of extension window to append when finding motif features. Default 500. Set to 0 to use actual element boundaries.')
     parser.add_option('-z', '--cons_extension', type=int, default=20,
-                      help='Size of extension window to append when calculating conservation. Default 20.')
+                      help='Size of extension window to append when calculating conservation. Default 20. Set to 0 to use actual element boundaries.')
     parser.add_option('-a', '--collapse_peaks', type='choice', choices=["max", "avg", "min", "sum"], default='max',
                       help='How to handle multiple overlapping peak features. Allowed values: max (use maximum score), avg (average all scores), min (use lowest score), sum (use sum of all scores). Default = max.')
     parser.add_option('-f', '--ctcf_f', type='string', help='Tabix-indexed CTCF peaks file in narrowPeak format.')
