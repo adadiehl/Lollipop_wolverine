@@ -6,9 +6,9 @@ Lollipop is a machine-learning-based framework for predicting the CTCF-mediated 
 * Training a model that distinguishes positive loops from negative loops.
 * Applying the trained model to a cell-type of interest to make *de novo* predictions of CTCF-mediated loops. 
 
-This branch was created by Adam Diehl in January 2018, based on the original (at https://github.com/ykai16/Lollipop), and adds the capability to use bed narrowPeak ChIP-seq data sources (signal density used as score), incorporates multiprocessing where possible, and increases configurability through addition of various command-line options.
+The Wolverine branch was created by Adam Diehl in January 2018, based on the original (at https://github.com/ykai16/Lollipop), and adds the capability to use bed narrowPeak ChIP-seq data sources (signal density used as score), incorporates multiprocessing where possible, and increases configurability through addition of various command-line options.
 
-## Dependencies
+### Dependencies
 Lollipop requires the following packages:
 
 
@@ -17,100 +17,163 @@ Lollipop requires the following packages:
 * Scikit-learn `http://scikit-learn.org/stable/`
 * HTSeq `https://htseq.readthedocs.io/en/release_0.9.1/`
 * multiprocessing
+* pyBigWig `https://github.com/deeptools/pyBigWig`
+* pytabix `https://pypi.python.org/pypi/pytabix`
 
 We recommend to use [Anaconda python distribution](https://www.anaconda.com/what-is-anaconda/) for installation of the above packages.
 
-## Input Data
 
-The input data used by *Lollipop* are available in `input_data`. For a summary of used data set, please see Supplementary Methods and Table 1 in the paper.
+### Input Data
 
-## Generating Training Data
+For a summary of data used in the original publication, please see Supplementary Methods and Table 1 in the paper.
 
-Pre-generated training data used in the paper are available in `training_data`. The data format is:
-
-| chrom   |      start1      |  start2 |     response      | ...features...     |
-|----------|:-------------:|------:|:-------------:|:-------------:|
-
-You can also generate training data for any cell-type of interest, as long as you have experimental data for CTCF-mediated loops, such as CTCF ChIA-PET and Hi-ChIP data. It takes two steps to do so:
-
-### Step 1. Preparing positive and negative loops for training purpose.
-
-Usage:
-
-`python prepare_training_interactions.py -p $CTCF_peak -a $CTCF_ChIA-PET_interactions -c $CTCF_HiC_interactions -o $training_interactions`
-
-Parameters:  
-
-`-p $CTCF_peak:`CTCF peak file in BED format.
-
-`-a $CTCF_ChIA-PET_interactions:`CTCF-mediated interactions identified by ChIA-PET or other methods. The file format is `chrom1 start1 end1 chrom2 start2 end2 IAB FDR strand1 strand2`, where `IAB` is the number of PETs connecting the anchors and `FDR` is the statistical significance.
-
-`-o $training_interactions:`Output file with positive and negative loops in the following format: `chrom anchor1 anchor2 response loop-length`, where `anchor1/2` is the genomic coordinate of the middle point of left/right anchor.
-
-### Step2. Characterizing prepared loops.
-
-Usage: 
-
-`python add_features.py -i $training_interactions -t $information_table -o $training_data`
-
-Parameters:
-
-`-i $training_interactions:` Output file from step1.
-
-`-t $information_table:` A table containing the paths of genomic and epigenomic datasets to derive features. An example of this table can be seen in `data/data_table.txt`. 
-
-`-o $training_data:` Output file with positive and negative loops characterized by a set of features. 
+Lollipop_wolverine adds the ability to use peak-based signals from ChIP-seq and similar experiments, and stores these in Tabix-indexed compressed files for speed and flexibility. PhastCons conservation data are now read in bigWig format, and motifs are read in Tabix-indexed compressed files, for the same reasons. See data/data_table.txt for an example of how to supply the locations and formats of these files (this is changed from the original version).
 
 
-## Building a model
+### Step 1: Preparing positive and negative loops for training purpose.
+
+Usage: prepare_training_interactions.py [options]
+
+Options:
+  -h, --help            show this help message and exit
+  -p <file>, --peak=<file>
+                        the CTCF peaks or summits in BED format
+  -a <file>, --chiapet=<file>
+                        the interaction file from ChIA-PET experiment
+  -c <file>, --hic=<file>
+                        the CTCF interactions identified by hic data
+  -o <file>, --train=<file>
+                        the resulting file with positive and sampled negative
+                        interactions for training
+  -l MIN_LOOP_SIZE, --min_loop_size=MIN_LOOP_SIZE
+                        Minimum loop size. Default 10,000.
+  -u MAX_LOOP_SIZE, --max_loop_size=MAX_LOOP_SIZE
+                        Maximum loop size. Default 1,000,000.
+  -r RATIO, --ratio=RATIO
+                        Ratio of negative to positive interactions. Default 5.
+                        Set to 0 to retain all negative interactions.
+  -z, --use_hic         Use Hi-C data as a supplement to ChIA-pet loops in
+                        finding negative loops.
+																															  
+### Step 2: Characterizing prepared loops.
+
+Usage: add_features.py [options]
+
+Options:
+  -h, --help            show this help message and exit
+  -i <file>, --training=<file>
+                        the training interactions generated in previous step
+  -t <file>, --table=<file>
+                        the infomation table contains the paths for necessary
+                        files.
+  -o <file>, --outfile=<file>
+                        the output file with all the interactions and
+                        calculated features.
+  -p PROCS, --procs=PROCS
+                        Number of processors to use. Default 1.
+  -e EXTENSION, --extension=EXTENSION
+                        Size of the extesion window to append up and
+                        downstream of each anchor peak for signal calculation.
+                        Default 2000. Set to 0 to use actual element
+                        boundaries.
+  -m MOTIF_EXTENSION, --motif_extension=MOTIF_EXTENSION
+                        Size of extension window to append when finding motif
+                        features. Default 500. Set to 0 to use actual element
+                        boundaries.
+  -z CONS_EXTENSION, --cons_extension=CONS_EXTENSION
+                        Size of extension window to append when calculating
+                        conservation. Default 20. Set to 0 to use actual
+                        element boundaries.
+  -c COLLAPSE_PEAKS, --collapse_peaks=COLLAPSE_PEAKS
+                        How to handle multiple overlapping peak features.
+                        Allowed values: max (use maximum score), avg (average
+                        all scores), min (use lowest score), sum (use sum of
+                        all scores). Default = max.
+  -n, --no_in_between_peaks
+                        Do not include "in-between" peaks in training and
+                        predictions. Our experimentation shows these may
+			negatively impact performance.
+  -g, --no_flanking_peaks
+                        Do not include "upstream" and "downstream" peaks in
+                        training and predictions. Our experimentation shows
+			these may negatively impact performance.
+
+
+### Step 3: Model training
+
 A model can be generated from the prepared training data, by using `train_model.py`.
 
-Usage:
+Usage: train_models.py [options]
 
-`python train_model.py -t $training_data -o $output_folder`
-
-Parameters:
-
-`-t $training_data:`The file with positive and negative loops characterized by features.
-
-`-o $output_folder:`The path of the folder where you want to put the resulting model and cross-validation results. ROC and PR curves are generated.
-
-## Making *De Novo* Predictions
-
-Lollipop employs a random forest classifier to distinguish positive from negative loops. The classifier trained from the three cell-lines (in `.pkl` format) and the *de novo* predictions made by each classicier are available in `denovo_predictions`. The format of predicted loops is:
-
-| chrom   |      start1      |  start2 |     probability      |    yes\_or_no      |  
-|----------|:-------------:|------:|:-------------:|:-------------:|
-
-Predicted loops that can be visualized in genome browsers, including UCSC genome browser, IGV and Washington U genome browser, are also available in the same folder.
-
-You can also apply the trained models to make *de novo* predictions in a cell-type of interest by running `make_denovo_predictions.py`.
-
-Usage:
-
-`python make_denovo_predictions.py -b $CTCF_Peaks -t $information_table -c $classifier -o $output_folder`
-
-Parameters:
-
-`-b $CTCF_Peaks:`CTCF peak file in BED format.
-
-`-t $information_table:` A table containing the paths of genomic and epigenomic datasets to derive features.
-
-`-c $classifier:`The trained classifier used for making predictions.
-
-`-o $output_folder:`The output folder for results. Output files include predicted loops in different formats that can be visulized in genome browser.
+Options:
+  -h, --help            show this help message and exit
+  -t <file>, --train=<file>
+                        The path of the training data
+  -o <file>, --output=<file>
+                        The complete path for the resulting model and relevant
+                        results
+  -p PROCS, --procs=PROCS
+                        Number of processors to use. Default=1.
+  -n N_ESTIMATORS, --n_estimators=N_ESTIMATORS
+                        The number of trees in the random forest. Default 100.
+  -m MAX_FEATURES, --max_features=MAX_FEATURES
+                        Maximum number of features. Default 18. Specify -1 for
+                        all features.
 
 
+### Step 4: Making *De Novo* Predictions
+
+Lollipop employs a random forest classifier to distinguish positive from negative loops. The classifier trained from the three cell-lines (in `.pkl` format) and the *de novo* predictions made by each classicier are available in `denovo_predictions`. Results are reported in standard bedpe format, with the reported loop probability given in the "score" column.
 
 
+Usage: make_denovo_predictions.py [options]
 
-
-
-
-
-
-
-
-
-
-
+Options:
+  -h, --help            show this help message and exit
+  -b <file>, --bs=<file>
+                        the CTCF ChIP-Seq peak file
+  -t <file>, --table=<file>
+                        the infomation table contains the paths of necessary
+                        files.
+  -c <file>, --clf=<file>
+                        The trained classifier for identifying the interacting
+                        loop pairs
+  -o OUTDIR, --outdir=OUTDIR
+                        The directory for output files, predicted loops, etc
+  -p PROCS, --procs=PROCS
+                        Number of processors to use. Default 1.
+  -u PROXIMAL, --proximal=PROXIMAL
+                        Minimum distance between upstream and downstream loop
+                        anchors. Default 10,000.
+  -d DISTAL, --distal=DISTAL
+                        Maximum distance between upstream and downstream loop
+                        anchors. Default 1e+6.
+  -e EXTENSION, --extension=EXTENSION
+                        Size of the extesion window to append up and
+                        downstream of each anchor peak for signal calculation.
+                        Default 2000 (as in original). Set to 0 to use actual
+                        element boundaries.
+  -m MOTIF_EXTENSION, --motif_extension=MOTIF_EXTENSION
+                        Size of extension window to append when finding motif
+                        features. Default 500. Set to 0 to use actual element
+                        boundaries.
+  -z CONS_EXTENSION, --cons_extension=CONS_EXTENSION
+                        Size of extension window to append when calculating
+                        conservation. Default 20. Set to 0 to use actual
+                        element boundaries.
+  -a COLLAPSE_PEAKS, --collapse_peaks=COLLAPSE_PEAKS
+                        How to handle multiple overlapping peak features.
+                        Allowed values: max (use maximum score), avg (average
+                        all scores), min (use lowest score), sum (use sum of
+                        all scores). Default = max.
+  -f CTCF_F, --ctcf_f=CTCF_F
+                        Tabix-indexed CTCF peaks file in narrowPeak format.
+  -r, --report_extension
+                        Report actual ChIP-seq peak boundaries in output
+                        instead of peak +- extension.
+  -n, --no_in_between_peaks
+                        Do not include "in-between" peaks in training and
+                        predictions.
+  -g, --no_flanking_peaks
+                        Do not include "upstream" and "downstream" peaks in
+                        training and predictions.
