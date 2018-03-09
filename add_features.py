@@ -83,33 +83,6 @@ def main(argv):
         
         sys.stderr.write("Processing features...\n")
         train = lib.prepare_features_for_interactions(train, anchors, signal_table, read_info, read_numbers, opt)
-        """
-        # AGD: Switched all this to standardized versions in lib. This _should_ not affect outcome.
-        # However, the reads-based and phastCons features have NOT been tested!
-	for index, row in signals_table.iterrows():
-		signal = row['Signal']
-		Format = row['Format']
-		Path = row['Path']
-
-		if signal == 'Motif':  # AGD: Don't use parens around conditionals
-                    sys.stderr.write("\tAdding motif annotations...\n")
-		    train = lib.add_motif_pattern(train, Path, opt)
-		elif signal == 'PhastCon':
-                    sys.stderr.write("\tAdding PhastCons conservation...\n")
-		    #train = add_anchor_conservation(train, chroms, Path)
-                    train = lib.add_bigwig_feature(train, Path, opt)
-		elif signal == 'Gene expression':
-                    sys.stderr.write("\tAdding gene expression...\n")
-		    train = lib.add_gene_expression(train, Path)
-		else:
-                    sys.stderr.write("\tProcessing {} features\n".format(signal))
-		    if Format == 'bed':
-			train = add_local_feature(signal, train, Path)
-			train = add_regional_feature_by_reads(signal, train, anchors, Path)
-                    elif Format == 'narrowPeak':
-                        train = lib.add_peak_feature(signal, train, Path, opt)
-        """
-
 	train.to_csv(opt.outfile,sep='\t', index=False)
 	end_time = time.time()
 	elapsed = end_time-start_time
