@@ -191,7 +191,7 @@ def main(argv):
         parser.print_help()
         sys.exit(1)
 
-
+        
     chroms = GenomeData.hg19_chroms
     outfile = open(opt.training,'w')
 
@@ -254,8 +254,8 @@ def main(argv):
                                                                     iv.peak2,
                                                                     0,
                                                                     length))
-        
-        
+                
+
     outfile.close()
 
 if __name__ == "__main__":

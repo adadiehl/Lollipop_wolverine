@@ -20,7 +20,7 @@ import pandas as pd
 import HTSeq
 import bisect
 
-import tabix as tb # Added by AGD
+import tabix as tb
 import multiprocessing
 import ctypes
 
@@ -59,7 +59,7 @@ def main(argv):
 	chroms = GenomeData.hg19_chroms
 	train = pd.read_table(opt.training)
 	train = train.sort_values(by=['chrom','peak1','peak2'], axis = 0, ascending=[1,1,1])
-
+        
         # Read in the signals table
         signal_table, signals = lib.load_signals_table(opt.info_table)
         

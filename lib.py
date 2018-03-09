@@ -187,7 +187,7 @@ def prepare_anchors(row, ext):
     anchor1 = HTSeq.GenomicInterval(chrom, start1, end1, '.')
     anchor2 = HTSeq.GenomicInterval(chrom, start2, end2, '.')
     return anchor1, anchor2
-                                                        
+
 
 def find_motif_pattern(map_args, def_param=(scores1, scores2, pattern)):
     """
@@ -254,7 +254,7 @@ def find_motif_pattern(map_args, def_param=(scores1, scores2, pattern)):
         elif feats2.shape[0] > 0:
             avg = feats2.score.max()/2.0
             sd = np.std([0, feats2.score.max()])
-        # else no motifs -- avg = sd = pat = 0
+    # else no motifs -- avg = sd = pat = 0
     else:
         index1 = feats1.score.idxmax()
         index2 = feats2.score.idxmax()
@@ -269,8 +269,8 @@ def find_motif_pattern(map_args, def_param=(scores1, scores2, pattern)):
     scores2[i] = sd
     pattern[i] = pat
     lock.release()
-            
 
+    
 def add_motif_pattern(train, Peak, opt):
     """
     This function is to add the motif pattern feature for interacting anchors in training data.
@@ -278,7 +278,7 @@ def add_motif_pattern(train, Peak, opt):
     chrom + start + end + strand + pvalue + score + phastCon
     Return a training data with added motif pattern feature
     """
-
+    
     base1 = multiprocessing.Array(ctypes.c_double, train.shape[0])
     scores1 = np.ctypeslib.as_array(base1.get_obj())
     base2 = multiprocessing.Array(ctypes.c_double, train.shape[0])
@@ -902,10 +902,10 @@ def add_anchor_conservation(train, chrom, Peak):
                 signal = 0
             else:
                 signal = float(signal)
-            cvg[start + i] = signal
-            i += 1
+                cvg[start + i] = signal
+                i += 1
     wiggle.close()
-
+                
     AvgCons = []
     DevCons = []
     for index, row in train.iterrows():
@@ -913,8 +913,8 @@ def add_anchor_conservation(train, chrom, Peak):
         con2 = sum(cvg[(int(row['peak2'])-ext): (int(row['peak2'])+ext)])
         AvgCons.append((con1+con2)/2.0)
         DevCons.append(np.std([con1, con2]))
-    train['avg_conservation'] = pd.Series(AvgCons)
-    train['std_conservation'] = pd.Series(DevCons)
+    train['avg_conservation'] = pd.Series(scores1)
+    train['std_conservation'] = pd.Series(scores2)
 
     return train
 
@@ -928,7 +928,7 @@ def add_features(data, anchors, read_info, read_numbers, signals):
     """
     extension = 2000
 
-    for factor in signals:
+    for factor in signal:
         print "Preparing features for "+str(factor)+'...'
         avg_signal = 'avg_'+str(factor)
         std_signal = 'std_'+str(factor)
