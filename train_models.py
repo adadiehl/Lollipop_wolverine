@@ -21,6 +21,8 @@ from sklearn.externals import joblib
 import numpy as np
 import pandas as pd
 from scipy import interp
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 def get_true_and_proba(estimator, X, y, n_folds, cv, opt):
