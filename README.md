@@ -38,20 +38,11 @@ Usage:
 
 Options:
 
-  `-h, --help            `show this help message and exit
-  `-p <file>, --peak=<file>
-  
-                        the CTCF peaks or summits in BED format
-  `-a <file>, --chiapet=<file>
-  
-                        the interaction file from ChIA-PET experiment
-  `-c <file>, --hic=<file>`
-  
-                        the CTCF interactions identified by hic data
-  `-o <file>, --train=<file>`
-  
-                        the resulting file with positive and sampled negative
-                        interactions for training
+  `-h, --help:`show this help message and exit
+  `-p $file, --peak=$file:`the CTCF peaks or summits in BED format
+  `-a $file, --chiapet=$file:`the interaction file from ChIA-PET experiment
+  `-c $file, --hic=$file:`the CTCF interactions identified by hic data
+  `-o $file, --train=$file:`the resulting file with positive and sampled negative interactions for training
 			
   `-l MIN_LOOP_SIZE, --min_loop_size=MIN_LOOP_SIZE`
   
