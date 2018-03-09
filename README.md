@@ -37,25 +37,39 @@ Usage:
 `prepare_training_interactions.py [options]`
 
 Options:
+
   `-h, --help            `show this help message and exit
   `-p <file>, --peak=<file>
-                        `the CTCF peaks or summits in BED format
+  
+                        the CTCF peaks or summits in BED format
   `-a <file>, --chiapet=<file>
-                        `the interaction file from ChIA-PET experiment
-  `-c <file>, --hic=<file>
-                        `the CTCF interactions identified by hic data
-  `-o <file>, --train=<file>
-                        `the resulting file with positive and sampled negative
-                        `interactions for training
-  `-l MIN_LOOP_SIZE, --min_loop_size=MIN_LOOP_SIZE
-                        `Minimum loop size. Default 10,000.
-  `-u MAX_LOOP_SIZE, --max_loop_size=MAX_LOOP_SIZE
-                        `Maximum loop size. Default 1,000,000.
-  -r RATIO, --ratio=RATIO
-                        `Ratio of negative to positive interactions. Default 5.
-                        `Set to 0 to retain all negative interactions.
-  -z, --use_hic         `Use Hi-C data as a supplement to ChIA-pet loops in
-                        `finding negative loops.
+  
+                        the interaction file from ChIA-PET experiment
+  `-c <file>, --hic=<file>`
+  
+                        the CTCF interactions identified by hic data
+  `-o <file>, --train=<file>`
+  
+                        the resulting file with positive and sampled negative
+                        interactions for training
+			
+  `-l MIN_LOOP_SIZE, --min_loop_size=MIN_LOOP_SIZE`
+  
+                        Minimum loop size. Default 10,000.
+			
+  `-u MAX_LOOP_SIZE, --max_loop_size=MAX_LOOP_SIZE`
+  
+                        Maximum loop size. Default 1,000,000.
+			
+  `-r RATIO, --ratio=RATIO`
+  
+                        Ratio of negative to positive interactions. Default 5.
+                        Set to 0 to retain all negative interactions.
+			
+  `z, --use_hic`
+  
+                        Use Hi-C data as a supplement to ChIA-pet loops in
+                        finding negative loops.
 																															  
 ### Step 2: Characterizing prepared loops.
 
