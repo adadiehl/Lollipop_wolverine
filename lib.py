@@ -153,6 +153,8 @@ def prepare_anchors_pool(bs, chroms, exclude_chroms):
             chrom in chroms and
             chrom not in exclude_chroms):
             bs_pool[chrom] = set()
+        if chrom in exclude_chroms:
+            continue
         bs_pool[chrom].add((row['chromStart'],
                             row['chromEnd'],
                             summit))

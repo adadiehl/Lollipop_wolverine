@@ -208,7 +208,7 @@ def main(argv):
 
     sys.stderr.write("Reading in positive datasets...\n")
     # Build the binding site pool: bs_pool = {'chrom':[summit1, summit2,...]} 
-    bs_pool, chroms, peak = prepare_anchors_pool(opt.peak, chroms, ["chrY"])
+    bs_pool, chroms, peak = prepare_anchors_pool(opt.peak, chroms, ["chrY", "chrM"])
 
     # Load Hi-C loops: used to ensure that the randomly generated negative loops are not true loops identified in HiC.
     hic_loops = {}
