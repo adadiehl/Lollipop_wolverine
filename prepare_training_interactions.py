@@ -185,22 +185,35 @@ def main(argv):
                       help="Ratio of negative to positive interactions. Default 5. Set to 0 to retain all negative interactions.")
     parser.add_option('-z', '--use_hic', action='store_true', default=False,
                       help="Use Hi-C data as a supplement to ChIA-pet loops in finding negative loops.")
+    parser.add_option('-g', '--genome', type="string", default="hg19",
+                      help="Genome base of input data. Default=hg19")
     
     (opt, args) = parser.parse_args(argv)
-    if len(argv) < 8:
+    if len(argv) < 8 & opt.use_hic:
         parser.print_help()
         sys.exit(1)
 
+
+    chroms = []
+    if opt.genome == "hg19":
+        chroms = GenomeData.hg19_chroms
+    elif opt.genome == "hg38":
+        chroms = GenomeData.hg38_chroms
+    elif opt.genome == "mm9":
+        chroms = GenomeData.mm9_chroms
+    elif opt.genome == "mm10":
+        chroms = GenomeData.mm10_chroms
         
-    chroms = GenomeData.hg19_chroms
     outfile = open(opt.training,'w')
 
     sys.stderr.write("Reading in positive datasets...\n")
-    # Build the binding stie pool: bs_pool = {'chrom':[summit1, summit2,...]} 
+    # Build the binding site pool: bs_pool = {'chrom':[summit1, summit2,...]} 
     bs_pool, chroms, peak = prepare_anchors_pool(opt.peak, chroms, ["chrY"])
 
     # Load Hi-C loops: used to ensure that the randomly generated negative loops are not true loops identified in HiC.
-    hic_loops = read_hic(opt.hic, bs_pool)
+    hic_loops = {}
+    if opt.use_hic:
+        hic_loops = read_hic(opt.hic, bs_pool)
 
     sys.stderr.write("Preparing positive interactions...\n")
     # Print the header
