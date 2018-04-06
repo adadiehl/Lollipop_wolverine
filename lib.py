@@ -131,6 +131,8 @@ def prepare_bs_pool(bs, chroms, exclude_chroms):
             chrom in chroms and
             chrom not in exclude_chroms):
             bs_pool[chrom] = set()
+        if chrom in exclude_chroms:
+            continue
         bs_pool[chrom].add(summit)
     for chrom in bs_pool.keys():
         bs_pool[chrom] = sorted(list(bs_pool[chrom]))
